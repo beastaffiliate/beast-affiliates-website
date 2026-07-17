@@ -35,6 +35,12 @@ DOMAIN_TO_CODE: list[tuple[str, str]] = sorted(
 )
 
 
+# Data-source switch (owner decision 2026-07-16): scraping is the primary and
+# default product-data method. PA-API code stays in the tree; set USE_PAAPI=true
+# (plus the PAAPI_* creds) to put the API back in front of the scraper.
+USE_PAAPI = os.getenv("USE_PAAPI", "").strip().lower() in ("1", "true", "yes")
+
+
 def paapi_credentials(code: str) -> dict | None:
     """PA-API creds for a marketplace from env, or None if not configured."""
     access = os.getenv(f"PAAPI_{code}_ACCESS_KEY")
@@ -50,7 +56,7 @@ def paapi_credentials(code: str) -> dict | None:
 # the second domain. Override per environment (.env locally points both at
 # localhost so links are clickable in dev).
 ARTICLE_BASE_US = os.getenv("ARTICLE_BASE_US", "https://beastaffiliates.com")
-ARTICLE_BASE_INTL = os.getenv("ARTICLE_BASE_INTL", "https://beastassocoate.com")
+ARTICLE_BASE_INTL = os.getenv("ARTICLE_BASE_INTL", "https://beastassociate.com")
 
 
 def article_base(marketplace_code: str) -> str:

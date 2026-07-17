@@ -11,7 +11,7 @@ import string
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import amazon_url, articlegen, paapi, scraper
+from . import amazon_url, articlegen, config, paapi, scraper
 from .config import MARKETPLACES, article_base
 from .models import Link, Product
 
@@ -43,28 +43,35 @@ def get_or_create_product(
     if product is not None:
         return product
 
-    data, source = None, ""
-    try:
-        data, source = paapi.get_item(marketplace, asin), "paapi"
-    except paapi.PaapiError:
+    # Scrape-first (owner decision); PA-API only when USE_PAAPI=true.
+    data, source, reasons = None, "", []
+    if config.USE_PAAPI:
+        try:
+            data, source = paapi.get_item(marketplace, asin), "paapi"
+        except paapi.PaapiError as e:
+            reasons.append(f"paapi: {e}")
+    if data is None:
         product_url = f"https://www.{MARKETPLACES[marketplace]['domain']}/dp/{asin}"
         try:
             data, source = scraper.scrape_product(product_url), "scrape"
-        except scraper.ScrapeError:
-            if fallback_title:
-                data = {"title": fallback_title, "image_url": fallback_image,
-                        "price": "", "bullets": []}
-                source = "message"
-            else:
-                raise LinkCreationError(
-                    f"no product data for {marketplace}/{asin} (PA-API and scrape failed)"
-                )
+        except scraper.ScrapeError as e:
+            reasons.append(f"scrape: {e}")
+    if data is None:
+        if fallback_title:
+            data = {"title": fallback_title, "image_url": fallback_image,
+                    "price": "", "bullets": []}
+            source = "message"
+        else:
+            raise LinkCreationError(
+                f"no product data for {marketplace}/{asin} ({'; '.join(reasons)})"
+            )
 
     product = Product(
         marketplace=marketplace,
         asin=asin,
         title=data["title"],
         image_url=data.get("image_url", ""),
+        rating=data.get("rating", ""),
         price=data.get("price", ""),
         bullets_json=json.dumps(data.get("bullets", [])),
         source=source,

@@ -1,22 +1,54 @@
-"""Fallback product scraper (used when PA-API is unavailable/unconfigured).
+"""Primary product-data scraper (owner decision: scrape-first, PA-API optional).
 
-Regex extraction proven in the local prototype: title, hi-res image, rating,
-feature bullets. Raises ScrapeError with a human-readable reason on failure.
+Regex extraction proven in the local prototype: title, hi-res image, feature
+bullets. Hardened for primary duty: several attempts rotating realistic
+browser identities (desktop Chrome / Firefox / mobile Safari) with a short
+pause between tries — Amazon's bot detection often passes one identity while
+blocking another. Raises ScrapeError with the per-attempt reasons on failure.
 """
 
 import html as htmllib
+import random
 import re
+import time
 
 import httpx
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+UA_PROFILES = [
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
+    },
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) "
+            "Gecko/20100101 Firefox/127.0"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.8",
+        "Upgrade-Insecure-Requests": "1",
+    },
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 "
+            "Mobile/15E148 Safari/604.1"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    },
+]
+
+# Kept for other modules that import HEADERS (diagnostics, tests).
+HEADERS = UA_PROFILES[0]
 
 
 class ScrapeError(Exception):
@@ -27,24 +59,40 @@ def _strip_tags(fragment: str) -> str:
     return htmllib.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
 
 
-def scrape_product(url: str, timeout: float = 20.0) -> dict:
+def _clean_title(title: str) -> str:
+    """Remove Amazon site chrome from <meta>/<title>-sourced titles:
+    'Amazon.com: Product' (prefix) and 'Product : Amazon.co.uk: Category'
+    (suffix) both reduce to just the product name."""
+    title = re.sub(r"^\s*Amazon\.[a-z.]{2,7}\s*:\s*", "", title, flags=re.I)
+    title = re.sub(r"\s*[:|]\s*Amazon\.[a-z.]{2,7}\s*:?.*$", "", title, flags=re.I)
+    return title.strip()
+
+
+def _attempt(url: str, headers: dict, timeout: float) -> dict:
     try:
-        r = httpx.get(url, headers=HEADERS, follow_redirects=True, timeout=timeout)
+        r = httpx.get(url, headers=headers, follow_redirects=True, timeout=timeout)
     except httpx.HTTPError as e:
         raise ScrapeError(f"fetch failed: {e}")
     if r.status_code != 200:
-        raise ScrapeError(f"Amazon returned HTTP {r.status_code}")
+        raise ScrapeError(f"HTTP {r.status_code}")
     text = r.text
     if "captcha" in text[:30000].lower():
-        raise ScrapeError("Amazon served a CAPTCHA page (bot detection)")
+        raise ScrapeError("CAPTCHA page")
 
     m = re.search(r'id="productTitle"[^>]*>\s*(.*?)\s*</span>', text, re.S)
     title = _strip_tags(m.group(1)) if m else None
     if not title:
         m = re.search(r'<meta name="title" content="([^"]+)"', text)
-        title = htmllib.unescape(m.group(1)) if m else None
+        title = _clean_title(htmllib.unescape(m.group(1))) if m else None
     if not title:
-        raise ScrapeError("could not find a product title in the page")
+        m = re.search(r"<title>\s*(.*?)\s*</title>", text, re.S)
+        candidate = _clean_title(_strip_tags(m.group(1))) if m else ""
+        # Reject generic pages (error/captcha titles) — a real product title
+        # is long; site chrome like "Something went wrong" is short.
+        if len(candidate) >= 20:
+            title = candidate
+    if not title:
+        raise ScrapeError("no product title in page")
 
     image = ""
     for pattern in (
@@ -58,6 +106,9 @@ def scrape_product(url: str, timeout: float = 20.0) -> dict:
             image = m.group(1)
             break
 
+    m = re.search(r"([0-9.]+) out of 5 stars", text)
+    rating = m.group(1) if m else ""
+
     bullets: list[str] = []
     m = re.search(r'id="feature-bullets".*?</ul>', text, re.S)
     if m:
@@ -68,4 +119,19 @@ def scrape_product(url: str, timeout: float = 20.0) -> dict:
             if cleaned and "hide" not in cleaned.lower()[:8]:
                 bullets.append(cleaned)
 
-    return {"title": title, "image_url": image, "price": "", "bullets": bullets[:6]}
+    return {"title": title, "image_url": image, "rating": rating, "price": "",
+            "bullets": bullets[:6]}
+
+
+def scrape_product(url: str, timeout: float = 15.0) -> dict:
+    """Try each browser identity in random order until one succeeds."""
+    reasons = []
+    profiles = random.sample(UA_PROFILES, len(UA_PROFILES))
+    for i, headers in enumerate(profiles):
+        try:
+            return _attempt(url, headers, timeout)
+        except ScrapeError as e:
+            reasons.append(str(e))
+            if i < len(profiles) - 1:
+                time.sleep(random.uniform(0.5, 1.5))
+    raise ScrapeError(" / ".join(reasons))

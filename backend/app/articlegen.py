@@ -13,7 +13,8 @@ def _sentence(text: str) -> str:
     return (text[0].upper() + text[1:] + ".") if text else ""
 
 
-def generate_copy(title: str, bullets: list[str], price: str = "") -> dict:
+def generate_copy(title: str, bullets: list[str], rating: str = "",
+                  price: str = "") -> dict:
     short = title.split(",")[0].strip()
     if bullets:
         para1 = " ".join(_sentence(b) for b in bullets[:2])
@@ -24,6 +25,10 @@ def generate_copy(title: str, bullets: list[str], price: str = "") -> dict:
             "reliable everyday performance without overpaying."
         )
         para2 = ""
+    if rating:
+        para2 = (para2 + f" With {rating} stars on Amazon, it's earning solid "
+                 "feedback from real buyers — check recent reviews to see if "
+                 "it fits your needs.").strip()
     if price:
         para2 = (para2 + f" Listed at {price} at the time of writing — check the "
                  "product page for the current price.").strip()

@@ -226,7 +226,7 @@ def _copy_for(product) -> dict:
     from .articlegen import generate_copy
 
     return generate_copy(product.title, json.loads(product.bullets_json),
-                         product.price)
+                         product.rating, product.price)
 
 
 @app.get("/b/{link_id}")

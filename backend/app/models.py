@@ -29,6 +29,7 @@ class Product(Base):
     asin: Mapped[str] = mapped_column(String(16), index=True)
     title: Mapped[str] = mapped_column(Text)
     image_url: Mapped[str] = mapped_column(Text, default="")
+    rating: Mapped[str] = mapped_column(String(8), default="")
     price: Mapped[str] = mapped_column(String(64), default="")
     bullets_json: Mapped[str] = mapped_column(Text, default="[]")
     source: Mapped[str] = mapped_column(String(16))  # paapi | scrape | message
