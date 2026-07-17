@@ -1,0 +1,10 @@
+{
+  "rewrites": [
+    { "source": "/portal/(.*)", "destination": "https://BACKEND_PROJECT.vercel.app/portal/$1" },
+    { "source": "/api/(.*)", "destination": "https://BACKEND_PROJECT.vercel.app/api/$1" },
+    { "source": "/p/(.*)", "destination": "https://BACKEND_PROJECT.vercel.app/p/$1" },
+    { "source": "/go/(.*)", "destination": "https://BACKEND_PROJECT.vercel.app/go/$1" },
+    { "source": "/b/(.*)", "destination": "https://BACKEND_PROJECT.vercel.app/b/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

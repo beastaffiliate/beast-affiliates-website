@@ -1,122 +1,65 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react";
+import { getToken, setToken } from "./api";
+import AuthView from "./views/AuthView";
+import OverviewView from "./views/OverviewView";
+import LinksView from "./views/LinksView";
+import ProfileView from "./views/ProfileView";
 
-function App() {
-  const [count, setCount] = useState(0)
+type Tab = "overview" | "links" | "profile";
+
+export default function App() {
+  const [authed, setAuthed] = useState(!!getToken());
+  const [tab, setTab] = useState<Tab>("overview");
+
+  useEffect(() => {
+    const onLogout = () => setAuthed(false);
+    window.addEventListener("portal-logout", onLogout);
+    return () => window.removeEventListener("portal-logout", onLogout);
+  }, []);
+
+  if (!authed) return <AuthView onAuthed={() => setAuthed(true)} />;
+
+  const signOut = () => {
+    setToken(null);
+    setAuthed(false);
+  };
 
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+      <nav className="nav">
+        <span className="wordmark">Beast Affiliates</span>
+        <div className="nav-tabs">
+          {(
+            [
+              ["overview", "Overview"],
+              ["links", "Your Links"],
+              ["profile", "Profile"],
+            ] as [Tab, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={`nav-tab ${tab === key ? "active" : ""}`}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+        <button className="pill pill-secondary pill-sm" onClick={signOut}>
+          Sign out
         </button>
-      </section>
+      </nav>
 
-      <div className="ticks"></div>
+      <main className="shell view-enter" key={tab}>
+        {tab === "overview" && <OverviewView />}
+        {tab === "links" && <LinksView />}
+        {tab === "profile" && <ProfileView />}
+      </main>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
+      <footer className="footer-band">
+        <strong>Beast Affiliates</strong> · share links, earn commissions ·
+        © 2026 All rights reserved
+      </footer>
     </>
-  )
+  );
 }
-
-export default App

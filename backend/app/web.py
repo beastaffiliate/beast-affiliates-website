@@ -25,8 +25,10 @@ from .config import (
 )
 from .database import get_session, init_db
 from .models import Link, LinkEvent
+from .portal import router as portal_router
 
 app = FastAPI(title="Beast Affiliates", docs_url=None, redoc_url=None)
+app.include_router(portal_router)
 
 
 @app.on_event("startup")
@@ -158,7 +160,11 @@ def article(link_id: str, slug: str, request: Request,
         # configured hosts so localhost/preview deployments are unaffected.
         canonical = article_base(link.marketplace)
         canonical_host = urlsplit(canonical).netloc
-        request_host = request.headers.get("host", "")
+        # Behind the portal-frontend proxy the original domain arrives in
+        # x-forwarded-host; without it, plain Host (direct hits, local dev).
+        request_host = (
+            request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        ).split(",")[0].strip()
         known_hosts = {urlsplit(ARTICLE_BASE_US).netloc,
                        urlsplit(ARTICLE_BASE_INTL).netloc}
         if request_host in known_hosts and request_host != canonical_host:
