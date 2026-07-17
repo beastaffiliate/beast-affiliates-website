@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.139.0",
     "httpx==0.28.1",
+    "psycopg2-binary==2.9.12",
     "python-dotenv==1.2.2",
     "sqlalchemy==2.0.44",
     "uvicorn==0.51.0",
