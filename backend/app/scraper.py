@@ -8,6 +8,7 @@ blocking another. Raises ScrapeError with the per-attempt reasons on failure.
 """
 
 import html as htmllib
+import json
 import random
 import re
 import time
@@ -105,6 +106,16 @@ def _attempt(url: str, headers: dict, timeout: float) -> dict:
         if m:
             image = m.group(1)
             break
+    if not image:
+        # Mobile pages carry images only as data-a-dynamic-image (HTML-escaped
+        # JSON of {url: [w, h]}) — take the largest by width.
+        m = re.search(r'data-a-dynamic-image="([^"]+)"', text)
+        if m:
+            try:
+                candidates = json.loads(htmllib.unescape(m.group(1)))
+                image = max(candidates, key=lambda u: candidates[u][0])
+            except (ValueError, TypeError, IndexError):
+                pass
 
     m = re.search(r"([0-9.]+) out of 5 stars", text)
     rating = m.group(1) if m else ""
@@ -123,15 +134,29 @@ def _attempt(url: str, headers: dict, timeout: float) -> dict:
             "bullets": bullets[:6]}
 
 
+def _quality(result: dict) -> tuple:
+    return (bool(result["image_url"]), len(result["bullets"]), bool(result["rating"]))
+
+
 def scrape_product(url: str, timeout: float = 15.0) -> dict:
-    """Try each browser identity in random order until one succeeds."""
-    reasons = []
-    profiles = random.sample(UA_PROFILES, len(UA_PROFILES))
-    for i, headers in enumerate(profiles):
+    """Try browser identities desktop-first (richest pages first); keep the
+    best result seen and stop early when it has both image and bullets. The
+    mobile identity is a last resort — its pages often lack our fields."""
+    reasons: list[str] = []
+    best: dict | None = None
+    for i, headers in enumerate(UA_PROFILES):
         try:
-            return _attempt(url, headers, timeout)
+            result = _attempt(url, headers, timeout)
         except ScrapeError as e:
             reasons.append(str(e))
-            if i < len(profiles) - 1:
-                time.sleep(random.uniform(0.5, 1.5))
+            result = None
+        if result is not None:
+            if result["image_url"] and result["bullets"]:
+                return result
+            if best is None or _quality(result) > _quality(best):
+                best = result
+        if i < len(UA_PROFILES) - 1:
+            time.sleep(random.uniform(0.5, 1.5))
+    if best is not None:
+        return best
     raise ScrapeError(" / ".join(reasons))

@@ -41,6 +41,21 @@ def get_or_create_product(
         select(Product).where(Product.marketplace == marketplace, Product.asin == asin)
     ).scalar_one_or_none()
     if product is not None:
+        if not product.image_url:
+            # Self-heal: earlier scrape got a degraded page (no image) — one
+            # retry on next use upgrades the cached row for ALL its links.
+            product_url = f"https://www.{MARKETPLACES[marketplace]['domain']}/dp/{asin}"
+            try:
+                fresh = scraper.scrape_product(product_url)
+                if fresh.get("image_url"):
+                    product.image_url = fresh["image_url"]
+                    product.title = fresh["title"] or product.title
+                    product.rating = fresh.get("rating") or product.rating
+                    if fresh.get("bullets"):
+                        product.bullets_json = json.dumps(fresh["bullets"])
+                    session.flush()
+            except scraper.ScrapeError:
+                pass  # keep the imageless cached row; try again next time
         return product
 
     # Scrape-first (owner decision); PA-API only when USE_PAAPI=true.

@@ -8,7 +8,7 @@ redirect must never be cached — it increments clicks.
 import base64
 import html as htmllib
 import json
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -16,7 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import service
-from .config import DEFAULT_STORE_NAME, SERVICE_KEY
+from .config import (
+    ARTICLE_BASE_INTL,
+    ARTICLE_BASE_US,
+    DEFAULT_STORE_NAME,
+    SERVICE_KEY,
+    article_base,
+)
 from .database import get_session, init_db
 from .models import Link, LinkEvent
 
@@ -143,8 +149,21 @@ async def api_create_link(
 
 
 @app.get("/p/{link_id}/{slug}", response_class=HTMLResponse)
-def article(link_id: str, slug: str, session: Session = Depends(get_session)):
+def article(link_id: str, slug: str, request: Request,
+            session: Session = Depends(get_session)):
     link = session.get(Link, link_id)
+    if link is not None and not link.revoked:
+        # Canonical-domain enforcement: US articles live on the US domain,
+        # everything else on the INTL domain. Only redirect between the two
+        # configured hosts so localhost/preview deployments are unaffected.
+        canonical = article_base(link.marketplace)
+        canonical_host = urlsplit(canonical).netloc
+        request_host = request.headers.get("host", "")
+        known_hosts = {urlsplit(ARTICLE_BASE_US).netloc,
+                       urlsplit(ARTICLE_BASE_INTL).netloc}
+        if request_host in known_hosts and request_host != canonical_host:
+            return RedirectResponse(f"{canonical}/p/{link.id}/{link.slug}",
+                                    status_code=308)
     if link is None or link.revoked:
         return HTMLResponse(
             page("Not found", "<div class='wrap'><h1>This product page is no "
@@ -266,7 +285,7 @@ def index(session: Session = Depends(get_session), error: str = "",
     if rows:
         body_rows = "".join(
             f"<tr><td><img src='{esc(r.product.image_url)}' alt=''></td>"
-            f"<td><a href='/p/{r.id}/{r.slug}' target='_blank'>"
+            f"<td><a href='{esc(article_base(r.marketplace))}/p/{r.id}/{r.slug}' target='_blank'>"
             f"{esc(r.product.title[:60])}</a><br><span class='pill'>{r.id} · "
             f"{r.marketplace} · {esc(r.product.source)}</span></td>"
             f"<td>{r.views}</td><td>{r.clicks}</td>"
