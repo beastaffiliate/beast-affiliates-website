@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Overview, SeriesDay } from "../types";
+import LinksView from "./LinksView";
 
 /** Animated count-up for the big aubergine stat numerals (client-side only). */
 function CountUp({ value, suffix = "" }: { value: number; suffix?: string }) {
@@ -192,6 +193,10 @@ export default function OverviewView() {
           )}
         </div>
       </div>
+
+      {/* Your Links lives here (owner decision) — full-width section below
+          Best Performers, not a separate tab. */}
+      <LinksView />
     </div>
   );
 }

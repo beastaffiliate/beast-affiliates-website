@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { getToken, setToken } from "./api";
 import AuthView from "./views/AuthView";
 import OverviewView from "./views/OverviewView";
-import LinksView from "./views/LinksView";
 import ProfileView from "./views/ProfileView";
 
-type Tab = "overview" | "links" | "profile";
+type Tab = "overview" | "profile";
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
@@ -32,7 +31,6 @@ export default function App() {
           {(
             [
               ["overview", "Overview"],
-              ["links", "Your Links"],
               ["profile", "Profile"],
             ] as [Tab, string][]
           ).map(([key, label]) => (
@@ -52,7 +50,6 @@ export default function App() {
 
       <main className="shell view-enter" key={tab}>
         {tab === "overview" && <OverviewView />}
-        {tab === "links" && <LinksView />}
         {tab === "profile" && <ProfileView />}
       </main>
 
