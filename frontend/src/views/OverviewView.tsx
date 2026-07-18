@@ -54,8 +54,9 @@ function TrendChart({ series }: { series: SeriesDay[] }) {
           strokeWidth="1"
         />
       ))}
-      <path className="chart-line" d={path("views")} stroke="var(--primary)" />
-      <path className="chart-line" d={path("clicks")} stroke="var(--link-blue)" style={{ animationDelay: "0.45s" }} />
+      <path className="chart-fill" d={`${path("views")} L${x(series.length - 1)},${height - pad} L${x(0)},${height - pad} Z`} fill="var(--link-blue)" style={{ opacity: 0.08 }} />
+      <path className="chart-line" d={path("views")} stroke="var(--link-blue)" />
+      <path className="chart-line" d={path("clicks")} stroke="#22c05c" style={{ animationDelay: "0.45s" }} />
       {series.map((d, i) => (
         <text
           key={d.date}
@@ -95,13 +96,13 @@ export default function OverviewView() {
       <div className="grid grid-4">
         {(
           [
-            ["Views", data.totals.views, ""],
-            ["Clicks", data.totals.clicks, ""],
-            ["Links", data.totals.links, ""],
-            ["Conversion", data.totals.conversion, "%"],
-          ] as [string, number, string][]
-        ).map(([label, value, suffix], i) => (
-          <div key={label} className={`card rise rise-${i + 1}`} style={{ padding: 24 }}>
+            ["Views", data.totals.views, "", "stat-blue"],
+            ["Clicks", data.totals.clicks, "", "stat-green"],
+            ["Links", data.totals.links, "", "stat-cream"],
+            ["Conversion", data.totals.conversion, "%", "stat-peach"],
+          ] as [string, number, string, string][]
+        ).map(([label, value, suffix, variant], i) => (
+          <div key={label} className={`card ${variant} rise rise-${i + 1}`} style={{ padding: 24 }}>
             <span className="eyebrow">{label}</span>
             <div>
               <CountUp value={value} suffix={suffix} />
@@ -115,8 +116,8 @@ export default function OverviewView() {
           <div className="row spread" style={{ marginBottom: 8 }}>
             <h3 className="heading">7-Day Trend</h3>
             <span className="caption muted">
-              <span style={{ color: "var(--primary)" }}>●</span> Views&nbsp;&nbsp;
-              <span style={{ color: "var(--link-blue)" }}>●</span> Clicks
+              <span style={{ color: "var(--link-blue)" }}>●</span> Views&nbsp;&nbsp;
+              <span style={{ color: "#22c05c" }}>●</span> Clicks
             </span>
           </div>
           <TrendChart series={data.series} />
@@ -160,7 +161,7 @@ export default function OverviewView() {
           )}
           {data.top.map((l, i) => (
             <div key={l.id} className="list-item">
-              <span className="muted" style={{ width: 18, fontWeight: 700 }}>{i + 1}</span>
+              <span className="rank">{i + 1}</span>
               {l.image_url ? <img src={l.image_url} alt="" /> : <span className="chip">{l.marketplace}</span>}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <a href={l.article_url} target="_blank" rel="noreferrer" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ink)", fontWeight: 600 }}>

@@ -43,13 +43,13 @@ export default function App() {
           {(
             [
               ["overview", "Overview"],
-              ["whatsapp", "WhatsApp"],
+              ["whatsapp", "WhatsApp Linking"],
               ["profile", "Profile"],
             ] as [Tab, string][]
           ).map(([key, label]) => (
             <button
               key={key}
-              className={`nav-tab ${tab === key ? "active" : ""}`}
+              className={`nav-tab ${key === "whatsapp" ? "wa-tab" : ""} ${tab === key ? "active" : ""}`}
               onClick={() => setTab(key)}
             >
               {label}
