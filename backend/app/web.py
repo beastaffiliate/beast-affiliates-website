@@ -100,15 +100,18 @@ td img{width:38px;height:38px;object-fit:contain}
 .okmsg{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px}
 .pill{background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 10px;font-size:12px}
 /* public store page */
-.store-head{margin:8px 0 20px}
+.store-head{margin:8px 0 20px;text-align:center}
 .store-head .slug{color:#94a3b8;font-size:12px;letter-spacing:.6px;text-transform:uppercase}
 .store-head h1{margin:4px 0 4px}
-.filters{border:1px solid #e5e7eb;border-radius:12px;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
+.filters{border:1px solid #e5e7eb;border-radius:12px;padding:12px 16px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
 .fbtn{display:inline-block;padding:8px 18px;border-radius:999px;font-size:14px;font-weight:600;color:#334155;background:#f1f5f9}
 .fbtn.on{background:#4a154b;color:#fff}
 .fbtn:hover{text-decoration:none}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-.pcard{border:1px solid #e5e7eb;border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+/* flex + justify-content:center (not grid) so a partial row of cards is
+   centered under the filter bar instead of stuck flush-left. */
+.cards{display:flex;flex-wrap:wrap;gap:18px;justify-content:center}
+.pcard{border:1px solid #e5e7eb;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;
+  flex:0 1 240px;width:240px}
 .pcard .pimg{background:#fff;display:grid;place-items:center;height:210px;padding:14px}
 .pcard .pimg img{max-width:100%;max-height:100%;object-fit:contain}
 .pcard .pbody{padding:12px 14px 16px;display:flex;flex-direction:column;gap:6px;flex:1}
@@ -121,8 +124,8 @@ td img{width:38px;height:38px;object-fit:contain}
 .empty{border:1px dashed #cbd5e1;border-radius:12px;padding:44px;text-align:center;color:#94a3b8}
 /* responsive (portal traffic is mostly mobile) */
 .cta-mobile{display:none}
-@media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.pcard .pimg{height:150px}}
+@media(max-width:760px){.pcard{flex-basis:150px;width:150px}.pcard .pimg{height:150px}}
+@media(max-width:420px){.pcard{flex-basis:130px;width:130px}}
 @media(max-width:640px){
   .wrap{padding:18px 14px}
   h1{font-size:22px;margin-bottom:14px}
