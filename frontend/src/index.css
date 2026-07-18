@@ -213,7 +213,15 @@ td img.thumb, .list-item img {
 }
 .avatar-lg { width: 72px; height: 72px; font-size: 26px; }
 
-.centered { max-width: 760px; margin: 0 auto; width: 100%; }
+.centered { max-width: 1020px; margin: 0 auto; width: 100%; }
+/* Store-slug row: the input must be allowed to shrink or it forces the row
+   (and the whole page) wider than a phone screen. */
+.slug-row { display: flex; gap: 10px; align-items: center; }
+.slug-row input { flex: 1; min-width: 0; }
+.slug-row .pill { white-space: nowrap; }
+@media (max-width: 640px) {
+  .slug-prefix { display: none; }
+}
 .form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
 @media (max-width: 640px) {

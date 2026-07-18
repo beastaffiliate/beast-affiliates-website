@@ -245,12 +245,11 @@ function StoreCard({ me, refreshMe, flash }: CardProps) {
 
       <label className="field" style={{ marginBottom: 6 }}>
         Choose your slug (3–40 characters, lowercase, hyphens allowed)
-        <div className="row" style={{ flexWrap: "nowrap" }}>
-          <span className="caption muted" style={{ whiteSpace: "nowrap" }}>
+        <div className="slug-row">
+          <span className="caption muted slug-prefix" style={{ whiteSpace: "nowrap" }}>
             {origin.replace(/^https?:\/\//, "")}/u/
           </span>
           <input
-            style={{ flex: 1 }}
             placeholder="e.g. tehman-deals"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
