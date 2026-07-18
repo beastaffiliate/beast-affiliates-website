@@ -425,28 +425,49 @@ def store_page(slug: str, request: Request, session: Session = Depends(get_sessi
     return HTMLResponse(page(f"Shop by {store_title}", body, head_extra=og))
 
 
+# A repeat view/click from the SAME browser within this window doesn't
+# recount — matches Amazon's own ~24h attribution cookie window, and stops
+# reloading a page or double-clicking the button from inflating the stats.
+DEDUP_SECONDS = 24 * 3600
+
+
 @app.get("/b/{link_id}")
-def beacon(link_id: str, session: Session = Depends(get_session)):
+def beacon(link_id: str, request: Request, session: Session = Depends(get_session)):
     link = session.get(Link, link_id)
-    if link is not None:
+    cookie_name = f"v_{link_id}"
+    already_counted = request.cookies.get(cookie_name) == "1"
+    if link is not None and not already_counted:
         link.views += 1
         session.add(LinkEvent(link_id=link.id, kind="view"))
         session.commit()
-    return Response(PIXEL_GIF, media_type="image/gif",
+    resp = Response(PIXEL_GIF, media_type="image/gif",
                     headers={"Cache-Control": "no-store"})
+    if link is not None and not already_counted:
+        resp.set_cookie(cookie_name, "1", max_age=DEDUP_SECONDS,
+                        httponly=True, samesite="lax", secure=True)
+    return resp
 
 
 @app.get("/go/{link_id}")
-def go(link_id: str, session: Session = Depends(get_session)):
+def go(link_id: str, request: Request, session: Session = Depends(get_session)):
     link = session.get(Link, link_id)
     if link is None or link.revoked:
         return HTMLResponse(page("Not found", "<div class='wrap'><h1>Link not "
                                  "found</h1></div>"), 404)
-    link.clicks += 1
-    session.add(LinkEvent(link_id=link.id, kind="click"))
-    session.commit()
-    return RedirectResponse(link.tagged_url, status_code=302,
+    cookie_name = f"c_{link_id}"
+    already_counted = request.cookies.get(cookie_name) == "1"
+    if not already_counted:
+        link.clicks += 1
+        session.add(LinkEvent(link_id=link.id, kind="click"))
+        session.commit()
+    # The redirect to Amazon ALWAYS happens regardless of dedup — only the
+    # click COUNT is deduped, never the actual navigation.
+    resp = RedirectResponse(link.tagged_url, status_code=302,
                             headers={"Cache-Control": "no-store"})
+    if not already_counted:
+        resp.set_cookie(cookie_name, "1", max_age=DEDUP_SECONDS,
+                        httponly=True, samesite="lax", secure=True)
+    return resp
 
 
 # ------------------------------------------------- dev/test create form (GET /)
