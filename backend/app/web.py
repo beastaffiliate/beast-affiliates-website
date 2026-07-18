@@ -160,11 +160,17 @@ def article(link_id: str, slug: str, request: Request,
         # configured hosts so localhost/preview deployments are unaffected.
         canonical = article_base(link.marketplace)
         canonical_host = urlsplit(canonical).netloc
-        # Behind the portal-frontend proxy the original domain arrives in
-        # x-forwarded-host; without it, plain Host (direct hits, local dev).
-        request_host = (
-            request.headers.get("x-forwarded-host") or request.headers.get("host", "")
-        ).split(",")[0].strip()
+        # Requests proxied by the portal-frontend project (beastaffiliates.com
+        # rewrites /p/* here) carry ?xfh=us because Vercel's proxy replaces the
+        # Host header with OUR domain — without the marker a US article would
+        # look like it's on the wrong domain and 308 back, looping forever.
+        if request.query_params.get("xfh") == "us":
+            request_host = urlsplit(ARTICLE_BASE_US).netloc
+        else:
+            request_host = (
+                request.headers.get("x-forwarded-host")
+                or request.headers.get("host", "")
+            ).split(",")[0].strip()
         known_hosts = {urlsplit(ARTICLE_BASE_US).netloc,
                        urlsplit(ARTICLE_BASE_INTL).netloc}
         if request_host in known_hosts and request_host != canonical_host:

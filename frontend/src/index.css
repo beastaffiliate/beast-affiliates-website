@@ -132,6 +132,11 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; 
 .grid { display: grid; gap: 20px; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-2 { grid-template-columns: 2fr 1fr; align-items: start; }
+/* CRITICAL: grid items default to min-width:auto, so long unbroken product
+   titles would force tracks wider than 1fr and blow the whole page past the
+   shell (horizontal scroll, broken alignment). Let them shrink. */
+.grid > * { min-width: 0; }
+img { max-width: 100%; }
 @media (max-width: 992px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .grid-2 { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .grid-4 { grid-template-columns: 1fr; } }
 
