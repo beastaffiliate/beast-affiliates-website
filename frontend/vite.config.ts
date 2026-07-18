@@ -15,6 +15,7 @@ export default defineConfig({
       "/p": backend,
       "/go": backend,
       "/b": backend,
+      "/u": backend,
     },
   },
 });

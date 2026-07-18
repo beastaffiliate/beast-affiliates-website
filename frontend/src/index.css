@@ -22,7 +22,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body, #root { min-height: 100%; }
+html, body { min-height: 100%; }
+/* Sticky footer: the shell grows, the footer band always sits at the bottom
+   even when content is short (e.g. loading states). */
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+#root > main { flex: 1; width: 100%; }
 
 body {
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -195,3 +199,42 @@ td img.thumb, .list-item img {
   text-align: center; padding: 28px 24px; font-size: 14px; margin-top: 64px;
 }
 .footer-band strong { color: var(--on-primary); }
+
+.loading {
+  min-height: 45vh; display: grid; place-items: center;
+  color: var(--ink-mute); font-size: 15px;
+}
+
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; object-fit: cover;
+  background: var(--canvas-lavender); display: grid; place-items: center;
+  font-weight: 700; font-size: 14px; color: var(--primary); overflow: hidden;
+  flex-shrink: 0;
+}
+.avatar-lg { width: 72px; height: 72px; font-size: 26px; }
+
+.centered { max-width: 760px; margin: 0 auto; width: 100%; }
+.form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) {
+  .form-2, .form-3 { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------- mobile (most users) */
+@media (max-width: 768px) {
+  .shell { padding: 18px 12px 56px; }
+  .card { padding: 18px; }
+  .card-aubergine { padding: 24px; }
+  .stat-number { font-size: 32px; }
+  h1.display { font-size: 28px; }
+  h2.display-md { font-size: 22px !important; }
+  h3.heading { font-size: 18px; }
+  .nav { padding: 10px 12px; }
+  .wordmark { font-size: 18px; }
+  .nav-tab { padding: 8px 14px; font-size: 14px; }
+  .pill { padding: 12px 20px; font-size: 15px; }
+  .pill-sm { padding: 8px 14px; font-size: 13px; }
+  td, th { padding: 8px; font-size: 13.5px; }
+  .footer-band { padding: 20px 16px; font-size: 13px; margin-top: 40px; }
+  .grid { gap: 14px; }
+}

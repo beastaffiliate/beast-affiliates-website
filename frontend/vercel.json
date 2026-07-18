@@ -5,6 +5,7 @@
     { "source": "/p/(.*)", "destination": "https://www.beastassociate.com/p/$1?xfh=us" },
     { "source": "/go/(.*)", "destination": "https://www.beastassociate.com/go/$1" },
     { "source": "/b/(.*)", "destination": "https://www.beastassociate.com/b/$1" },
+    { "source": "/u/(.*)", "destination": "https://www.beastassociate.com/u/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -8,6 +8,7 @@ redirect must never be cached — it increments clicks.
 import base64
 import html as htmllib
 import json
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -23,8 +24,9 @@ from .config import (
     SERVICE_KEY,
     article_base,
 )
-from .database import get_session, init_db
+from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
+from .portal import PortalAccount, run_portal_migrations
 from .portal import router as portal_router
 
 app = FastAPI(title="Beast Affiliates", docs_url=None, redoc_url=None)
@@ -34,6 +36,7 @@ app.include_router(portal_router)
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    run_portal_migrations(engine)
     if not SERVICE_KEY:
         print("WARNING: SERVICE_KEY unset - /api/links is open (dev mode only)")
 
@@ -96,6 +99,45 @@ td img{width:38px;height:38px;object-fit:contain}
 .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px}
 .okmsg{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px}
 .pill{background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 10px;font-size:12px}
+/* public store page */
+.store-head{margin:8px 0 20px}
+.store-head .slug{color:#94a3b8;font-size:12px;letter-spacing:.6px;text-transform:uppercase}
+.store-head h1{margin:4px 0 4px}
+.filters{border:1px solid #e5e7eb;border-radius:12px;padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
+.fbtn{display:inline-block;padding:8px 18px;border-radius:999px;font-size:14px;font-weight:600;color:#334155;background:#f1f5f9}
+.fbtn.on{background:#4a154b;color:#fff}
+.fbtn:hover{text-decoration:none}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.pcard{border:1px solid #e5e7eb;border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+.pcard .pimg{background:#fff;display:grid;place-items:center;height:210px;padding:14px}
+.pcard .pimg img{max-width:100%;max-height:100%;object-fit:contain}
+.pcard .pbody{padding:12px 14px 16px;display:flex;flex-direction:column;gap:6px;flex:1}
+.pcard .ptitle{font-size:14.5px;font-weight:600;line-height:1.35;color:#1a1a2e;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pcard .pmeta{font-size:12.5px;color:#64748b}
+.pcard .pbtn{margin-top:auto;display:block;text-align:center;background:#4a154b;color:#fff;
+  font-weight:700;font-size:14px;padding:11px;border-radius:8px}
+.pcard .pbtn:hover{background:#611f69;text-decoration:none}
+.empty{border:1px dashed #cbd5e1;border-radius:12px;padding:44px;text-align:center;color:#94a3b8}
+/* responsive (portal traffic is mostly mobile) */
+.cta-mobile{display:none}
+@media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.pcard .pimg{height:150px}}
+@media(max-width:640px){
+  .wrap{padding:18px 14px}
+  h1{font-size:22px;margin-bottom:14px}
+  h2{font-size:18px}
+  header{padding:12px 16px}
+  header .brand{font-size:16px}
+  .imgcard{min-height:auto;padding:14px}
+  .box{padding:14px 16px}
+  .cols{grid-template-columns:1fr}
+  .grid{gap:18px}
+  .cta-mobile{display:block;margin:0 0 16px}
+  .side .cta{display:none}
+  .filters{padding:10px 12px}
+  .fbtn{padding:7px 14px;font-size:13px}
+}
 """
 
 
@@ -220,6 +262,7 @@ def article(link_id: str, slug: str, request: Request,
 <a href='#disclosure'>Affiliate Disclosure</a></header>
 <div class='wrap'>
   <h1>{esc(product.title[:90])}</h1>
+  <a class='cta cta-mobile' href='/go/{link.id}' rel='nofollow sponsored'>View on Amazon</a>
   <div class='grid'>
     <div>
       <div class='imgcard'><img src='{esc(product.image_url)}' alt='{esc(product.title[:60])}'></div>
@@ -258,6 +301,97 @@ def _copy_for(product) -> dict:
 
     return generate_copy(product.title, json.loads(product.bullets_json),
                          product.rating, product.price)
+
+
+@app.get("/u/{slug}", response_class=HTMLResponse)
+def store_page(slug: str, request: Request, session: Session = Depends(get_session)):
+    """Public store page: a user's recent products, filterable by day/country."""
+    account = session.execute(
+        select(PortalAccount).where(PortalAccount.store_slug == slug.strip().lower())
+    ).scalar_one_or_none()
+    if account is None or not account.store_enabled:
+        return HTMLResponse(
+            page("Not found", "<div class='wrap'><h1>This store page is not "
+                 "available.</h1></div>"), 404)
+
+    rng = request.query_params.get("range", "week")
+    if rng not in ("today", "yesterday", "week"):
+        rng = "week"
+    country = request.query_params.get("country", "").upper()
+
+    links = session.execute(
+        select(Link)
+        .where(Link.sender == account.whatsapp_number, Link.revoked == 0)
+        .order_by(Link.created_at.desc())
+        .limit(200)
+    ).scalars().all()
+
+    today = datetime.utcnow().date()
+    if rng == "today":
+        links = [l for l in links if l.created_at.date() == today]
+    elif rng == "yesterday":
+        links = [l for l in links if l.created_at.date() == today - timedelta(days=1)]
+    else:
+        links = [l for l in links if l.created_at >= datetime.utcnow() - timedelta(days=7)]
+    if country:
+        links = [l for l in links if l.marketplace == country]
+
+    # Deduplicate products (same ASIN shared twice shows once, newest link wins).
+    seen: set = set()
+    unique_links = []
+    for l in links:
+        key = (l.marketplace, l.asin)
+        if key not in seen:
+            seen.add(key)
+            unique_links.append(l)
+
+    store_title = next((l.store_name for l in unique_links if l.store_name), "") or (
+        account.username.capitalize()
+    )
+    countries = sorted({l.marketplace for l in links} | ({country} if country else set()))
+
+    def fbtn(label: str, value: str) -> str:
+        q = f"?range={value}" + (f"&country={country}" if country else "")
+        return (f"<a class='fbtn {'on' if rng == value else ''}' "
+                f"href='/u/{esc(account.store_slug)}{q}'>{label}</a>")
+
+    options = "".join(
+        f"<option value='{c}' {'selected' if c == country else ''}>{c}</option>"
+        for c in countries
+    )
+    cards = "".join(
+        f"""<div class='pcard'>
+  <div class='pimg'><img src='{esc(l.product.image_url)}' alt='' loading='lazy'></div>
+  <div class='pbody'>
+    <div class='ptitle'>{esc(l.product.title[:110])}</div>
+    <div class='pmeta'>{esc(l.marketplace)}{f" · ★ {esc(l.product.rating)}" if l.product.rating else ""}</div>
+    <a class='pbtn' href='{esc(article_base(l.marketplace))}/p/{l.id}/{l.slug}'>View product</a>
+  </div>
+</div>"""
+        for l in unique_links
+    )
+    body = f"""
+<header><div class='brand'><div class='logo'>{esc(store_title[:1].upper())}</div>{esc(store_title)}</div>
+<a href='#'>Affiliate Disclosure</a></header>
+<div class='wrap'>
+  <div class='store-head'>
+    <span class='slug'>/u/{esc(account.store_slug)}</span>
+    <h1>Shop by {esc(store_title)}</h1>
+    <p style='color:#64748b'>Hand-picked Amazon products, refreshed as they come in.</p>
+  </div>
+  <div class='filters'>
+    {fbtn("Today", "today")}{fbtn("Yesterday", "yesterday")}{fbtn("This Week", "week")}
+    <select onchange="location='/u/{esc(account.store_slug)}?range={rng}'+(this.value?'&country='+this.value:'')"
+      style='padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px'>
+      <option value=''>All countries</option>{options}
+    </select>
+  </div>
+  {f"<div class='cards'>{cards}</div>" if unique_links else
+   "<div class='empty'>No products in this period yet — check back soon.</div>"}
+</div>"""
+    og = (f"<meta property='og:title' content='Shop by {esc(store_title)}'>"
+          "<meta property='og:description' content='Hand-picked Amazon products'>")
+    return HTMLResponse(page(f"Shop by {store_title}", body, head_extra=og))
 
 
 @app.get("/b/{link_id}")

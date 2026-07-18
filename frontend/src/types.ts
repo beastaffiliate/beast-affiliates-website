@@ -34,6 +34,12 @@ export interface Me {
   name: string;
   store_name: string;
   link_preference: "direct" | "hub";
+  avatar: string;
+  store_slug: string;
+  store_enabled: boolean;
+  bank: string;
+  account_title: string;
+  account_number: string;
 }
 
 export type CheckStatus = "unregistered" | "unclaimed" | "claimed";

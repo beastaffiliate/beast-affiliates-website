@@ -82,7 +82,7 @@ export default function OverviewView() {
   }, []);
 
   if (error) return <div className="banner banner-error">{error}</div>;
-  if (!data) return <p className="muted">Loading…</p>;
+  if (!data) return <div className="loading">Loading…</div>;
 
   const copy = async (url: string, id: string) => {
     await navigator.clipboard.writeText(url);

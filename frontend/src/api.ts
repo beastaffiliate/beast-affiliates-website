@@ -70,4 +70,23 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ current, new: next }),
     }),
+  putAvatar: (avatar: string) =>
+    request<{ ok: boolean }>("/portal/avatar", {
+      method: "PUT",
+      body: JSON.stringify({ avatar }),
+    }),
+  storeCheck: (slug: string) =>
+    request<{ available: boolean; reason?: string }>(
+      `/portal/store/check?slug=${encodeURIComponent(slug)}`,
+    ),
+  putStore: (data: { slug?: string; enabled?: boolean }) =>
+    request<{ store_slug: string; store_enabled: boolean }>("/portal/store", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  putPayout: (data: { bank: string; account_title: string; account_number: string }) =>
+    request<{ bank: string; account_title: string; account_number: string }>(
+      "/portal/payout",
+      { method: "PUT", body: JSON.stringify(data) },
+    ),
 };

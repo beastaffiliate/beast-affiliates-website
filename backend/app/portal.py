@@ -17,9 +17,11 @@ import secrets
 import time
 from datetime import datetime, timedelta
 
+import re
+
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy import DateTime, Integer, String, select
+from sqlalchemy import DateTime, Integer, String, Text, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .config import SERVICE_KEY
@@ -42,6 +44,44 @@ class PortalAccount(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Profile photo as a small data-URL (client resizes to ~128px before upload).
+    avatar: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Public store page (/u/<slug>).
+    store_slug: Mapped[str | None] = mapped_column(String(48), nullable=True, unique=True)
+    store_enabled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Payout details (consumed by the earnings phase later).
+    bank: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    account_title: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    account_number: Mapped[str] = mapped_column(String(64), default="", server_default="")
+
+
+# Startup DDL for databases created before these columns existed (create_all
+# never alters existing tables). Postgres understands IF NOT EXISTS; the
+# SQLite fallback retries without it and swallows duplicate-column errors.
+PORTAL_MIGRATIONS = [
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS avatar TEXT DEFAULT ''",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS store_slug VARCHAR(48)",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS store_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS bank VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_title VARCHAR(120) DEFAULT ''",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_number VARCHAR(64) DEFAULT ''",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
+]
+
+
+def run_portal_migrations(engine) -> None:
+    from sqlalchemy import text as sql_text
+
+    for ddl in PORTAL_MIGRATIONS:
+        try:
+            with engine.begin() as conn:
+                conn.execute(sql_text(ddl))
+        except Exception:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(sql_text(ddl.replace(" IF NOT EXISTS", "")))
+            except Exception:
+                pass  # column/index already exists (SQLite path)
 
 
 # ------------------------------------------------------------------ passwords
@@ -256,7 +296,97 @@ def me(account: PortalAccount = Depends(current_account)):
         "name": bot_user.get("name", ""),
         "store_name": bot_user.get("store_name", ""),
         "link_preference": bot_user.get("link_preference", "direct"),
+        "avatar": account.avatar,
+        "store_slug": account.store_slug or "",
+        "store_enabled": bool(account.store_enabled),
+        "bank": account.bank,
+        "account_title": account.account_title,
+        "account_number": account.account_number,
     }
+
+
+@router.put("/avatar")
+async def set_avatar(
+    request: Request,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    avatar = str((await _body(request)).get("avatar", ""))
+    if avatar and not avatar.startswith("data:image/"):
+        raise HTTPException(422, "Invalid image")
+    if len(avatar) > 300_000:
+        raise HTTPException(422, "Image too large — try a smaller photo")
+    account.avatar = avatar
+    session.add(account)
+    session.commit()
+    return {"ok": True}
+
+
+SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$")
+
+
+@router.get("/store/check")
+def store_check(
+    slug: str,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    slug = slug.strip().lower()
+    if not SLUG_RE.match(slug):
+        return {"available": False, "reason": "3–40 chars, lowercase letters, numbers, hyphens"}
+    taken = session.execute(
+        select(PortalAccount).where(
+            PortalAccount.store_slug == slug, PortalAccount.id != account.id
+        )
+    ).scalar_one_or_none()
+    return {"available": taken is None}
+
+
+@router.put("/store")
+async def update_store(
+    request: Request,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    body = await _body(request)
+    if "slug" in body:
+        slug = str(body["slug"]).strip().lower()
+        if not SLUG_RE.match(slug):
+            raise HTTPException(422, "Slug: 3–40 chars, lowercase letters, numbers, hyphens")
+        taken = session.execute(
+            select(PortalAccount).where(
+                PortalAccount.store_slug == slug, PortalAccount.id != account.id
+            )
+        ).scalar_one_or_none()
+        if taken is not None:
+            raise HTTPException(409, "That slug is taken")
+        account.store_slug = slug
+    if "enabled" in body:
+        if not account.store_slug:
+            raise HTTPException(422, "Save a slug first")
+        account.store_enabled = 1 if body["enabled"] else 0
+    session.add(account)
+    session.commit()
+    return {"store_slug": account.store_slug or "",
+            "store_enabled": bool(account.store_enabled)}
+
+
+@router.put("/payout")
+async def update_payout(
+    request: Request,
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    body = await _body(request)
+    bank = str(body.get("bank", "")).strip()[:64]
+    title = str(body.get("account_title", "")).strip()[:120]
+    number = str(body.get("account_number", "")).strip()[:64]
+    if not (bank and title and number):
+        raise HTTPException(422, "Bank, account title and account number are all required")
+    account.bank, account.account_title, account.account_number = bank, title, number
+    session.add(account)
+    session.commit()
+    return {"bank": bank, "account_title": title, "account_number": number}
 
 
 @router.put("/profile")
