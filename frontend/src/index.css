@@ -183,6 +183,8 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; 
   position: sticky; top: 0; z-index: 10; gap: 12px; flex-wrap: wrap;
 }
 .wordmark { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; color: var(--primary); }
+.brand-mark { display: flex; align-items: center; gap: 9px; flex-shrink: 0; min-width: 0; }
+.brand-logo { height: 34px; width: 34px; object-fit: contain; display: block; flex-shrink: 0; }
 .nav-tabs { display: flex; gap: 6px; }
 .nav-tab {
   background: transparent; color: var(--ink-mute); font-weight: 600; font-size: 15px;
@@ -327,6 +329,8 @@ td img.thumb, .list-item img {
   h3.heading { font-size: 18px; }
   .nav { padding: 10px 12px; }
   .wordmark { font-size: 18px; }
+  .brand-logo { height: 26px; width: 26px; }
+  .brand-mark { gap: 7px; }
   .nav-tab { padding: 8px 14px; font-size: 14px; }
   .pill { padding: 12px 20px; font-size: 15px; }
   .pill-sm { padding: 8px 14px; font-size: 13px; }

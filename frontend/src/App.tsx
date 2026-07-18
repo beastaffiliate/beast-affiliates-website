@@ -38,7 +38,10 @@ export default function App() {
   return (
     <>
       <nav className="nav">
-        <span className="wordmark">Beast Affiliates</span>
+        <div className="brand-mark">
+          <img src="/logo-icon.png" alt="" className="brand-logo" />
+          <span className="wordmark">Beast Affiliates</span>
+        </div>
         <div className="nav-tabs">
           {(
             [
