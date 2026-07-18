@@ -82,7 +82,7 @@ export default function AuthView({ onAuthed }: { onAuthed: () => void }) {
               </p>
               <div style={{ display: "grid", gap: 14 }}>
                 <input
-                  placeholder="+92 300 1234567"
+                  placeholder="+92599199565 or 03111154854"
                   value={number}
                   autoFocus
                   onChange={(e) => setNumber(e.target.value)}

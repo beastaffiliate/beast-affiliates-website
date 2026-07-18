@@ -206,10 +206,24 @@ def bot_update_preferences(number: str, payload: dict) -> dict:
 # --------------------------------------------------------------------- helpers
 
 def _norm_number(raw: str) -> str:
-    number = raw.strip().replace(" ", "").replace("-", "")
-    if number and not number.startswith("+"):
-        number = "+" + number
-    return number
+    """Best-effort normalize a user-typed WhatsApp number to the E.164 form
+    the bot database stores (e.g. '+923111592151'). Handles:
+      - already E.164, any country: '+923141789562', '+447352089145'
+      - Pakistani local format with trunk 0: '03111592151' -> '+92...'
+        (this platform's userbase; other countries must include their code)
+      - international dialing prefix: '00923111592151' -> '+92...'
+      - bare digits already including a country code: '923111592151' -> '+92...'
+    """
+    number = re.sub(r"[^\d+]", "", raw.strip())
+    if not number:
+        return ""
+    if number.startswith("00"):
+        return "+" + number[2:]
+    if number.startswith("+"):
+        return number
+    if number.startswith("0"):
+        return "+92" + number[1:]
+    return "+" + number
 
 
 async def _body(request: Request) -> dict:
