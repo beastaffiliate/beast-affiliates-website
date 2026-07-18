@@ -68,7 +68,7 @@ function PersonalCard({ me, refreshMe, flash }: CardProps) {
   };
 
   return (
-    <div className="card accent-purple rise">
+    <div className="card tint-purple rise">
       <h3 className="heading" style={{ marginBottom: 18 }}>Personal Information</h3>
       <div className="row" style={{ gap: 18, marginBottom: 18 }}>
         {me!.avatar ? (
@@ -152,7 +152,7 @@ function ReplyCard({ me, refreshMe, flash }: CardProps) {
   };
 
   return (
-    <div className="card accent-blue rise rise-1">
+    <div className="card tint-blue rise rise-1">
       <h3 className="heading" style={{ marginBottom: 18 }}>WhatsApp Replies</h3>
       <div style={{ display: "grid", gap: 16 }}>
         <label className="field">
@@ -236,7 +236,7 @@ function StoreCard({ me, refreshMe, flash }: CardProps) {
   };
 
   return (
-    <div className="card accent-green rise rise-2">
+    <div className="card tint-green rise rise-2">
       <h3 className="heading" style={{ marginBottom: 6 }}>Public store page</h3>
       <p className="caption muted" style={{ marginBottom: 16 }}>
         A personal page you can share with your audience — it shows your latest
@@ -345,7 +345,7 @@ function PayoutCard({ me, refreshMe, flash }: CardProps) {
   };
 
   return (
-    <div className="card accent-peach rise rise-3">
+    <div className="card tint-peach rise rise-3">
       <h3 className="heading" style={{ marginBottom: 6 }}>Payout Settings</h3>
       <p className="caption muted" style={{ marginBottom: 16 }}>
         Where your commission payouts will be sent.
@@ -415,7 +415,7 @@ function PasswordCard({ flash }: { flash: (k: "ok" | "error", t: string) => void
   };
 
   return (
-    <div className="card accent-lavender rise rise-4">
+    <div className="card tint-violet rise rise-4">
       <h3 className="heading" style={{ marginBottom: 18 }}>Change password</h3>
       <div className="form-2">
         <label className="field">

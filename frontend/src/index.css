@@ -115,12 +115,60 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; 
   display: grid; place-items: center; font-weight: 700; font-size: 13px;
 }
 
-/* Per-section accent stripes for profile cards */
-.accent-purple { border-top: 3px solid var(--primary); }
-.accent-blue { border-top: 3px solid var(--link-blue); }
-.accent-green { border-top: 3px solid #22c05c; }
-.accent-peach { border-top: 3px solid #f0a468; }
-.accent-lavender { border-top: 3px solid #c9a7e8; }
+/* Full-color profile sections: tinted background instead of a border, the
+   card lightens further on hover, and every button inside picks up the same
+   hue so each section reads as one coherent color block. */
+.tint-purple { background: #f6ecf7; border: 0; }
+.tint-purple:hover { background: #f0e0f3; }
+.tint-purple .pill-primary, .tint-purple .pill-outline {
+  background: var(--primary); color: var(--on-primary); border-color: var(--primary);
+}
+.tint-purple .pill-primary:hover, .tint-purple .pill-outline:hover { background: var(--primary-press); }
+.tint-purple .pill-secondary { background: #ead6ee; color: var(--primary); }
+.tint-purple .pill-secondary:hover { background: #e0c5e6; }
+
+.tint-blue { background: #eaf3fb; border: 0; }
+.tint-blue:hover { background: #dcecf9; }
+.tint-blue .pill-primary, .tint-blue .pill-outline {
+  background: var(--link-blue); color: var(--on-primary); border-color: var(--link-blue);
+}
+.tint-blue .pill-primary:hover, .tint-blue .pill-outline:hover { background: var(--link-hover); }
+.tint-blue .pill-secondary { background: #d3e6f6; color: var(--link-blue); }
+.tint-blue .pill-secondary:hover { background: #c2dcf3; }
+
+.tint-green { background: #eaf7ef; border: 0; }
+.tint-green:hover { background: #dcf1e4; }
+.tint-green .pill-primary, .tint-green .pill-outline {
+  background: #1aa54d; color: #fff; border-color: #1aa54d;
+}
+.tint-green .pill-primary:hover, .tint-green .pill-outline:hover { background: #148a40; }
+.tint-green .pill-secondary { background: #d3ecdc; color: #0d7a43; }
+.tint-green .pill-secondary:hover { background: #c1e4cd; }
+
+.tint-peach { background: #fff1e7; border: 0; }
+.tint-peach:hover { background: #ffe7d5; }
+.tint-peach .pill-primary, .tint-peach .pill-outline {
+  background: #d97706; color: #fff; border-color: #d97706;
+}
+.tint-peach .pill-primary:hover, .tint-peach .pill-outline:hover { background: #b7630a; }
+.tint-peach .pill-secondary { background: #fde3cd; color: #c2571b; }
+.tint-peach .pill-secondary:hover { background: #fbd6b3; }
+
+.tint-violet { background: #f1eefc; border: 0; }
+.tint-violet:hover { background: #e6e0fa; }
+.tint-violet .pill-primary, .tint-violet .pill-outline {
+  background: #6d4fc2; color: #fff; border-color: #6d4fc2;
+}
+.tint-violet .pill-primary:hover, .tint-violet .pill-outline:hover { background: #5b3fa8; }
+.tint-violet .pill-secondary { background: #e2d9f7; color: #6d4fc2; }
+.tint-violet .pill-secondary:hover { background: #d4c6f2; }
+
+.tint-purple input, .tint-blue input, .tint-green input,
+.tint-peach input, .tint-violet input,
+.tint-purple select, .tint-blue select, .tint-green select,
+.tint-peach select, .tint-violet select {
+  background: var(--canvas); border-color: rgba(0, 0, 0, 0.08);
+}
 .chip {
   display: inline-block; background: var(--canvas-cream); color: var(--ink);
   font-size: 12px; font-weight: 700; letter-spacing: 0.96px; text-transform: uppercase;
