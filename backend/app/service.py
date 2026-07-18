@@ -116,6 +116,28 @@ def create_link(
         session, marketplace, asin, fallback_title, fallback_image
     )
 
+    # Reuse: the same sender sharing the same product again gets their
+    # existing (non-revoked) article back instead of a new one every time.
+    # Tag/store name are refreshed in case the user's tracking ID or store
+    # name changed since the link was first created.
+    if sender:
+        existing = session.execute(
+            select(Link).where(
+                Link.sender == sender,
+                Link.marketplace == marketplace,
+                Link.asin == asin,
+                Link.revoked == 0,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            new_tagged_url = amazon_url.canonical_tagged_url(url, marketplace, asin, tag)
+            if existing.tag != tag or existing.store_name != store_name:
+                existing.tag = tag
+                existing.store_name = store_name
+                existing.tagged_url = new_tagged_url
+                session.commit()
+            return existing, f"{article_base(marketplace)}/p/{existing.id}/{existing.slug}"
+
     link = Link(
         id=_new_link_id(session),
         slug=articlegen.make_slug(product.title),

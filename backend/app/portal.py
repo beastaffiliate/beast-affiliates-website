@@ -223,7 +223,7 @@ def _user_links(session: Session, number: str) -> list[Link]:
     return (
         session.execute(
             select(Link)
-            .where(Link.sender == number)
+            .where(Link.sender == number, Link.revoked == 0)
             .order_by(Link.created_at.desc())
         ).scalars().all()
     )

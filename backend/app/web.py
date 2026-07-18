@@ -439,7 +439,7 @@ def beacon(link_id: str, session: Session = Depends(get_session)):
 @app.get("/go/{link_id}")
 def go(link_id: str, session: Session = Depends(get_session)):
     link = session.get(Link, link_id)
-    if link is None:
+    if link is None or link.revoked:
         return HTMLResponse(page("Not found", "<div class='wrap'><h1>Link not "
                                  "found</h1></div>"), 404)
     link.clicks += 1
