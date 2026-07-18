@@ -55,6 +55,26 @@ class PortalAccount(Base):
     account_number: Mapped[str] = mapped_column(String(64), default="", server_default="")
 
 
+class WaLinkCode(Base):
+    """Short-lived single-use codes for linking extra WhatsApp numbers.
+    Generated in the portal; claimed by the BOT backend when an unregistered
+    number sends the code on WhatsApp."""
+
+    __tablename__ = "wa_link_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    code: Mapped[str] = mapped_column(String(8), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+
+
+CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
+CODE_TTL_SECONDS = 180
+BOT_WA_NUMBER = os.getenv("BOT_WA_NUMBER", "+923489712640")
+MAX_WA_NUMBERS = 3  # primary + 2 linked
+
+
 # Startup DDL for databases created before these columns existed (create_all
 # never alters existing tables). Postgres understands IF NOT EXISTS; the
 # SQLite fallback retries without it and swallows duplicate-column errors.
@@ -369,6 +389,75 @@ async def update_store(
     session.commit()
     return {"store_slug": account.store_slug or "",
             "store_enabled": bool(account.store_enabled)}
+
+
+@router.post("/wa/code")
+def generate_wa_code(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    """New linking code (invalidates the account's previous unused codes)."""
+    for old in session.execute(
+        select(WaLinkCode).where(
+            WaLinkCode.account_id == account.id, WaLinkCode.used == 0
+        )
+    ).scalars():
+        old.used = 1
+    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
+    session.add(
+        WaLinkCode(
+            account_id=account.id,
+            code=code,
+            expires_at=datetime.utcnow() + timedelta(seconds=CODE_TTL_SECONDS),
+        )
+    )
+    session.commit()
+    return {"code": code, "expires_in": CODE_TTL_SECONDS}
+
+
+@router.get("/wa/status")
+def wa_status(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    linked: list[str] = []
+    try:
+        if BOT_API_URL:
+            r = httpx.get(
+                f"{BOT_API_URL}/service/users/{account.whatsapp_number}/linked",
+                headers={"X-Service-Key": BOT_SERVICE_KEY},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                linked = r.json().get("linked", [])
+    except httpx.HTTPError:
+        pass  # show primary only; portal stays usable
+    return {
+        "primary": account.whatsapp_number,
+        "linked": linked,
+        "max": MAX_WA_NUMBERS,
+        "bot_number": BOT_WA_NUMBER,
+    }
+
+
+@router.delete("/wa/linked/{number}")
+def wa_unlink(
+    number: str,
+    account: PortalAccount = Depends(current_account),
+):
+    try:
+        r = httpx.delete(
+            f"{BOT_API_URL}/service/users/{account.whatsapp_number}/linked/{number}",
+            headers={"X-Service-Key": BOT_SERVICE_KEY},
+            timeout=10,
+        )
+    except httpx.HTTPError:
+        raise HTTPException(503, "Could not unlink — try again later")
+    if r.status_code == 404:
+        raise HTTPException(404, "That number is not linked")
+    if r.status_code not in (200, 204):
+        raise HTTPException(503, "Could not unlink — try again later")
+    return {"ok": True}
 
 
 @router.put("/payout")

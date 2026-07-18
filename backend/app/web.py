@@ -26,7 +26,7 @@ from .config import (
 )
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
-from .portal import PortalAccount, run_portal_migrations
+from .portal import PortalAccount, WaLinkCode, run_portal_migrations
 from .portal import router as portal_router
 
 app = FastAPI(title="Beast Affiliates", docs_url=None, redoc_url=None)
@@ -190,6 +190,34 @@ async def api_create_link(
         "title": link.product.title,
         "source": link.product.source,
     }
+
+
+@app.post("/api/wa-codes/claim")
+async def claim_wa_code(
+    request: Request,
+    session: Session = Depends(get_session),
+    x_service_key: str = Header(default=""),
+):
+    """Bot backend calls this when an unregistered number sends a 6-char code.
+    Single-use: a successful claim consumes the code."""
+    if SERVICE_KEY and x_service_key != SERVICE_KEY:
+        return Response(json.dumps({"error": "unauthorized"}), 401,
+                        media_type="application/json")
+    body = json.loads(await request.body() or b"{}")
+    code = str(body.get("code", "")).strip().upper()
+    row = session.execute(
+        select(WaLinkCode).where(WaLinkCode.code == code, WaLinkCode.used == 0)
+    ).scalar_one_or_none()
+    if row is None or row.expires_at < datetime.utcnow():
+        return Response(json.dumps({"error": "invalid or expired"}), 404,
+                        media_type="application/json")
+    account = session.get(PortalAccount, row.account_id)
+    if account is None:
+        return Response(json.dumps({"error": "account gone"}), 404,
+                        media_type="application/json")
+    row.used = 1
+    session.commit()
+    return {"primary_number": account.whatsapp_number}
 
 
 @app.get("/p/{link_id}/{slug}", response_class=HTMLResponse)

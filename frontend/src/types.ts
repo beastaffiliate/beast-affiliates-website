@@ -43,3 +43,10 @@ export interface Me {
 }
 
 export type CheckStatus = "unregistered" | "unclaimed" | "claimed";
+
+export interface WaStatus {
+  primary: string;
+  linked: string[];
+  max: number;
+  bot_number: string;
+}
