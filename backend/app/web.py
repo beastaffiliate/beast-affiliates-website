@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import service
+from .favicon_asset import FAVICON_PNG_B64
 from .config import (
     ARTICLE_BASE_INTL,
     ARTICLE_BASE_US,
@@ -42,6 +43,14 @@ def _startup() -> None:
 
 
 PIXEL_GIF = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+FAVICON_PNG = base64.b64decode(FAVICON_PNG_B64)
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.png")
+def favicon():
+    return Response(FAVICON_PNG, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=604800"})
 
 
 def esc(v) -> str:
@@ -148,6 +157,7 @@ def page(title: str, body: str, head_extra: str = "") -> str:
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<link rel='icon' type='image/png' href='/favicon.png'>"
         f"<title>{esc(title)}</title>{head_extra}<style>{CSS}</style></head>"
         f"<body>{body}<footer>© 2026 Beast Affiliates. All rights reserved."
         "</footer></body></html>"

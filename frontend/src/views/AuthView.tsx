@@ -57,8 +57,11 @@ export default function AuthView({ onAuthed }: { onAuthed: () => void }) {
     <div className="mesh-canvas">
       <div style={{ width: "100%", maxWidth: 460 }}>
         <div style={{ textAlign: "center", marginBottom: 24 }} className="rise">
-          <div className="wordmark" style={{ fontSize: 30 }}>
-            Beast Affiliates
+          <div className="row" style={{ justifyContent: "center", gap: 10 }}>
+            <img src="/logo-icon.png" alt="" className="brand-logo" style={{ height: 42, width: 42 }} />
+            <div className="wordmark" style={{ fontSize: 30 }}>
+              Beast Affiliates
+            </div>
           </div>
           <p className="muted caption" style={{ marginTop: 4 }}>
             Share links. Track clicks. Earn commissions.
