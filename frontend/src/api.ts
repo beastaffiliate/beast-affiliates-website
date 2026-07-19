@@ -1,4 +1,4 @@
-import type { CheckStatus, LinkOut, Me, Overview, WaStatus } from "./types";
+import type { CheckStatus, LinkOut, Me, MyEarnings, Overview, WaStatus } from "./types";
 
 // Same-origin in both dev and prod. In dev, vite.config proxies these paths
 // to the local backend; in prod, vercel.json rewrites them to the backend
@@ -89,6 +89,8 @@ export const api = {
       "/portal/payout",
       { method: "PUT", body: JSON.stringify(data) },
     ),
+  earnings: () => request<MyEarnings>("/portal/earnings"),
+
   waStatus: () => request<WaStatus>("/portal/wa/status"),
   waCode: () =>
     request<{ code: string; expires_in: number }>("/portal/wa/code", {

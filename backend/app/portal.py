@@ -55,6 +55,8 @@ class PortalAccount(Base):
     account_number: Mapped[str] = mapped_column(String(64), default="", server_default="")
     # Admin suspension: blocks login without freeing the number for re-claim.
     disabled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Earnings share %. NULL -> the global default rate applies.
+    commission_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class WaLinkCode(Base):
@@ -88,6 +90,7 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_title VARCHAR(120) DEFAULT ''",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_number VARCHAR(64) DEFAULT ''",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS disabled INTEGER DEFAULT 0",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS commission_rate INTEGER",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -802,4 +805,327 @@ def admin_performance(days: int = 30, session: Session = Depends(get_session)):
     return {
         "per_user": sorted(per_user.values(), key=lambda u: -u["clicks"]),
         "series": [{"date": d, **v} for d, v in series.items()],
+    }
+
+
+
+# ======================================================================
+# Earnings (admin-managed, PKR only). The admin reads per-tracking-ID
+# totals from their own Amazon dashboard and records entries here; users
+# see ONLY their computed share — never the gross amount or their rate.
+# ======================================================================
+
+class PortalSetting(Base):
+    __tablename__ = "portal_settings"
+
+    key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200))
+
+
+SETTING_DEFAULTS = {"default_rate": "20", "min_payout": "1000"}
+
+
+def get_setting(session: Session, key: str) -> str:
+    row = session.get(PortalSetting, key)
+    return row.value if row else SETTING_DEFAULTS[key]
+
+
+def set_setting(session: Session, key: str, value: str) -> None:
+    row = session.get(PortalSetting, key)
+    if row is None:
+        session.add(PortalSetting(key=key, value=value))
+    else:
+        row.value = value
+
+
+class EarningsEntry(Base):
+    """One admin-entered earning line. kind:
+    'earning'    — gross PKR x frozen rate -> net share
+    'bonus'      — net entered directly (e.g. referral bonus)
+    'adjustment' — net entered directly, may be negative (returns etc.)"""
+
+    __tablename__ = "earnings_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(12))
+    gross_amount: Mapped[int] = mapped_column(Integer, default=0)
+    rate_applied: Mapped[int] = mapped_column(Integer, default=0)
+    net_amount: Mapped[int] = mapped_column(Integer)
+    label: Mapped[str] = mapped_column(String(80))
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PayoutRecord(Base):
+    __tablename__ = "payout_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    method: Mapped[str] = mapped_column(String(220), default="")  # snapshot
+    note: Mapped[str] = mapped_column(String(200), default="")
+    paid_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+def _effective_rate(session: Session, account: PortalAccount) -> int:
+    if account.commission_rate is not None:
+        return account.commission_rate
+    return int(get_setting(session, "default_rate"))
+
+
+def _earnings_summary(session: Session, account: PortalAccount) -> dict:
+    entries = session.execute(
+        select(EarningsEntry).where(EarningsEntry.account_id == account.id)
+    ).scalars().all()
+    payouts = session.execute(
+        select(PayoutRecord).where(PayoutRecord.account_id == account.id)
+    ).scalars().all()
+    earned = sum(e.net_amount for e in entries)
+    paid = sum(p.amount for p in payouts)
+    return {"earned": earned, "paid": paid, "balance": earned - paid,
+            "entries_count": len(entries)}
+
+
+# ----------------------------------------------------- admin (service key)
+
+
+@admin_router.get("/earnings", dependencies=[Depends(require_service_key)])
+def admin_earnings_overview(session: Session = Depends(get_session)):
+    accounts = session.execute(
+        select(PortalAccount).order_by(PortalAccount.username)
+    ).scalars().all()
+    rows = []
+    for a in accounts:
+        summary = _earnings_summary(session, a)
+        rows.append({
+            "account_id": a.id,
+            "username": a.username,
+            "whatsapp_number": a.whatsapp_number,
+            "rate": _effective_rate(session, a),
+            "custom_rate": a.commission_rate,
+            **summary,
+        })
+    return {
+        "settings": {
+            "default_rate": int(get_setting(session, "default_rate")),
+            "min_payout": int(get_setting(session, "min_payout")),
+        },
+        "users": rows,
+    }
+
+
+@admin_router.put("/earnings/settings", dependencies=[Depends(require_service_key)])
+async def admin_earnings_settings(
+    request: Request, session: Session = Depends(get_session)
+):
+    body = await _body(request)
+    if "default_rate" in body:
+        rate = int(body["default_rate"])
+        if not 0 <= rate <= 100:
+            raise HTTPException(422, "Rate must be 0-100")
+        set_setting(session, "default_rate", str(rate))
+    if "min_payout" in body:
+        mp = int(body["min_payout"])
+        if mp < 0:
+            raise HTTPException(422, "Minimum payout cannot be negative")
+        set_setting(session, "min_payout", str(mp))
+    session.commit()
+    return {
+        "default_rate": int(get_setting(session, "default_rate")),
+        "min_payout": int(get_setting(session, "min_payout")),
+    }
+
+
+@admin_router.put(
+    "/earnings/{account_id}/rate", dependencies=[Depends(require_service_key)]
+)
+async def admin_set_rate(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    rate = body.get("rate", None)
+    if rate is None:
+        account.commission_rate = None  # revert to default
+    else:
+        rate = int(rate)
+        if not 0 <= rate <= 100:
+            raise HTTPException(422, "Rate must be 0-100")
+        account.commission_rate = rate
+    session.commit()
+    return {"rate": _effective_rate(session, account),
+            "custom_rate": account.commission_rate}
+
+
+@admin_router.get(
+    "/earnings/{account_id}", dependencies=[Depends(require_service_key)]
+)
+def admin_earnings_detail(account_id: int, session: Session = Depends(get_session)):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    entries = session.execute(
+        select(EarningsEntry)
+        .where(EarningsEntry.account_id == account.id)
+        .order_by(EarningsEntry.created_at.desc())
+    ).scalars().all()
+    payouts = session.execute(
+        select(PayoutRecord)
+        .where(PayoutRecord.account_id == account.id)
+        .order_by(PayoutRecord.paid_at.desc())
+    ).scalars().all()
+    return {
+        "username": account.username,
+        "rate": _effective_rate(session, account),
+        "custom_rate": account.commission_rate,
+        "payout_method": " | ".join(
+            x for x in (account.bank, account.account_title, account.account_number) if x
+        ),
+        **_earnings_summary(session, account),
+        "entries": [
+            {"id": e.id, "kind": e.kind, "gross_amount": e.gross_amount,
+             "rate_applied": e.rate_applied, "net_amount": e.net_amount,
+             "label": e.label, "note": e.note,
+             "created_at": e.created_at.isoformat()}
+            for e in entries
+        ],
+        "payouts": [
+            {"id": p.id, "amount": p.amount, "method": p.method,
+             "note": p.note, "paid_at": p.paid_at.isoformat()}
+            for p in payouts
+        ],
+    }
+
+
+@admin_router.post(
+    "/earnings/{account_id}/entries", dependencies=[Depends(require_service_key)]
+)
+async def admin_add_entry(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    kind = str(body.get("kind", "earning"))
+    label = str(body.get("label", "")).strip()[:80]
+    note = str(body.get("note", "")).strip()[:200]
+    if kind not in ("earning", "bonus", "adjustment"):
+        raise HTTPException(422, "Invalid kind")
+    if not label:
+        raise HTTPException(422, "Label is required (e.g. 'July 2026')")
+    if kind == "earning":
+        gross = int(body.get("gross_amount", 0))
+        if gross <= 0:
+            raise HTTPException(422, "Gross amount (PKR) must be positive")
+        rate = _effective_rate(session, account)
+        net = round(gross * rate / 100)
+    else:
+        gross, rate = 0, 0
+        net = int(body.get("net_amount", 0))
+        if net == 0:
+            raise HTTPException(422, "Amount cannot be zero")
+        if kind == "bonus" and net < 0:
+            raise HTTPException(422, "Bonus must be positive")
+    entry = EarningsEntry(
+        account_id=account.id, kind=kind, gross_amount=gross,
+        rate_applied=rate, net_amount=net, label=label, note=note,
+    )
+    session.add(entry)
+    session.commit()
+    return {"id": entry.id, "net_amount": net, "rate_applied": rate}
+
+
+@admin_router.delete(
+    "/earnings/{account_id}/entries/{entry_id}",
+    dependencies=[Depends(require_service_key)],
+)
+def admin_delete_entry(
+    account_id: int, entry_id: int, session: Session = Depends(get_session)
+):
+    entry = session.get(EarningsEntry, entry_id)
+    if entry is None or entry.account_id != account_id:
+        raise HTTPException(404, "Entry not found")
+    session.delete(entry)
+    session.commit()
+    return {"ok": True}
+
+
+@admin_router.post(
+    "/earnings/{account_id}/payouts", dependencies=[Depends(require_service_key)]
+)
+async def admin_add_payout(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    amount = int(body.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(422, "Amount (PKR) must be positive")
+    method = " | ".join(
+        x for x in (account.bank, account.account_title, account.account_number) if x
+    )
+    payout = PayoutRecord(
+        account_id=account.id, amount=amount, method=method,
+        note=str(body.get("note", "")).strip()[:200],
+    )
+    session.add(payout)
+    session.commit()
+    return {"id": payout.id}
+
+
+@admin_router.delete(
+    "/earnings/{account_id}/payouts/{payout_id}",
+    dependencies=[Depends(require_service_key)],
+)
+def admin_delete_payout(
+    account_id: int, payout_id: int, session: Session = Depends(get_session)
+):
+    payout = session.get(PayoutRecord, payout_id)
+    if payout is None or payout.account_id != account_id:
+        raise HTTPException(404, "Payout not found")
+    session.delete(payout)
+    session.commit()
+    return {"ok": True}
+
+
+# ------------------------------------------------------------ user-facing
+
+
+@router.get("/earnings")
+def my_earnings(
+    session: Session = Depends(get_session),
+    account: PortalAccount = Depends(current_account),
+):
+    """The user's view: net share only — no gross amounts, no rate."""
+    summary = _earnings_summary(session, account)
+    entries = session.execute(
+        select(EarningsEntry)
+        .where(EarningsEntry.account_id == account.id)
+        .order_by(EarningsEntry.created_at.desc())
+    ).scalars().all()
+    payouts = session.execute(
+        select(PayoutRecord)
+        .where(PayoutRecord.account_id == account.id)
+        .order_by(PayoutRecord.paid_at.desc())
+    ).scalars().all()
+    return {
+        "earned": summary["earned"],
+        "paid": summary["paid"],
+        "balance": summary["balance"],
+        "min_payout": int(get_setting(session, "min_payout")),
+        "entries": [
+            {"kind": e.kind, "amount": e.net_amount, "label": e.label,
+             "created_at": e.created_at.isoformat()}
+            for e in entries
+        ],
+        "payouts": [
+            {"amount": p.amount, "paid_at": p.paid_at.isoformat(), "note": p.note}
+            for p in payouts
+        ],
     }

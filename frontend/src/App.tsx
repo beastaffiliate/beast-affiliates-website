@@ -3,10 +3,11 @@ import { api, getToken, setToken } from "./api";
 import type { Me } from "./types";
 import AuthView from "./views/AuthView";
 import OverviewView from "./views/OverviewView";
+import EarningsView from "./views/EarningsView";
 import WhatsAppView from "./views/WhatsAppView";
 import ProfileView from "./views/ProfileView";
 
-type Tab = "overview" | "whatsapp" | "profile";
+type Tab = "overview" | "earnings" | "whatsapp" | "profile";
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
@@ -46,6 +47,7 @@ export default function App() {
           {(
             [
               ["overview", "Overview"],
+              ["earnings", "Earnings"],
               ["whatsapp", "WhatsApp Linking"],
               ["profile", "Profile"],
             ] as [Tab, string][]
@@ -83,6 +85,7 @@ export default function App() {
 
       <main className="shell view-enter" key={tab}>
         {tab === "overview" && <OverviewView />}
+        {tab === "earnings" && <EarningsView />}
         {tab === "whatsapp" && <WhatsAppView />}
         {tab === "profile" && <ProfileView me={me} refreshMe={refreshMe} />}
       </main>

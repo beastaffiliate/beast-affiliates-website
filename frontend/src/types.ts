@@ -50,3 +50,12 @@ export interface WaStatus {
   max: number;
   bot_number: string;
 }
+
+export interface MyEarnings {
+  earned: number;
+  paid: number;
+  balance: number;
+  min_payout: number;
+  entries: { kind: string; amount: number; label: string; created_at: string }[];
+  payouts: { amount: number; paid_at: string; note: string }[];
+}
