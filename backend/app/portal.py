@@ -756,3 +756,50 @@ def admin_account_links(account_id: int, session: Session = Depends(get_session)
             for l in links
         ]
     }
+
+
+@admin_router.get("/performance", dependencies=[Depends(require_service_key)])
+def admin_performance(days: int = 30, session: Session = Depends(get_session)):
+    """Cross-user analytics for the admin Performance tab.
+    days<=0 means all time (the daily series then covers the last 90 days)."""
+    cutoff = None if days <= 0 else datetime.utcnow() - timedelta(days=days)
+    series_days = days if 0 < days <= 90 else 90
+
+    accounts = session.execute(select(PortalAccount)).scalars().all()
+    account_by_number = {a.whatsapp_number: a for a in accounts}
+
+    links = session.execute(
+        select(Link).where(Link.sender.in_(list(account_by_number)), Link.revoked == 0)
+    ).scalars().all() if account_by_number else []
+    link_owner = {l.id: l.sender for l in links}
+
+    ev_query = select(LinkEvent).where(LinkEvent.link_id.in_(list(link_owner)))
+    if cutoff is not None:
+        ev_query = ev_query.where(LinkEvent.ts >= cutoff)
+    events = session.execute(ev_query).scalars().all() if link_owner else []
+
+    per_user = {
+        n: {"username": a.username, "whatsapp_number": n,
+            "views": 0, "clicks": 0, "links": 0}
+        for n, a in account_by_number.items()
+    }
+    for l in links:
+        if cutoff is None or l.created_at >= cutoff:
+            per_user[l.sender]["links"] += 1
+    day_list = [
+        (datetime.utcnow() - timedelta(days=i)).date()
+        for i in range(series_days - 1, -1, -1)
+    ]
+    series = {d.isoformat(): {"views": 0, "clicks": 0} for d in day_list}
+    for e in events:
+        owner = link_owner.get(e.link_id)
+        if owner:
+            per_user[owner]["views" if e.kind == "view" else "clicks"] += 1
+        key = e.ts.date().isoformat()
+        if key in series:
+            series[key]["views" if e.kind == "view" else "clicks"] += 1
+
+    return {
+        "per_user": sorted(per_user.values(), key=lambda u: -u["clicks"]),
+        "series": [{"date": d, **v} for d, v in series.items()],
+    }
