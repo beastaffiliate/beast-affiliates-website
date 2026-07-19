@@ -28,10 +28,12 @@ from .config import (
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
 from .portal import PortalAccount, WaLinkCode, run_portal_migrations
+from .portal import admin_router as portal_admin_router
 from .portal import router as portal_router
 
 app = FastAPI(title="Beast Affiliates", docs_url=None, redoc_url=None)
 app.include_router(portal_router)
+app.include_router(portal_admin_router)
 
 
 @app.on_event("startup")

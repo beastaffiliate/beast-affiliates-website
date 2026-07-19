@@ -53,6 +53,8 @@ class PortalAccount(Base):
     bank: Mapped[str] = mapped_column(String(64), default="", server_default="")
     account_title: Mapped[str] = mapped_column(String(120), default="", server_default="")
     account_number: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    # Admin suspension: blocks login without freeing the number for re-claim.
+    disabled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class WaLinkCode(Base):
@@ -85,6 +87,7 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS bank VARCHAR(64) DEFAULT ''",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_title VARCHAR(120) DEFAULT ''",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_number VARCHAR(64) DEFAULT ''",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS disabled INTEGER DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -159,6 +162,8 @@ def current_account(
     )
     if account is None:
         raise HTTPException(status_code=401, detail="Not signed in")
+    if account.disabled:
+        raise HTTPException(status_code=401, detail="Account disabled")
     return account
 
 
@@ -312,6 +317,8 @@ async def login(request: Request, session: Session = Depends(get_session)):
     ).scalar_one_or_none()
     if account is None or not verify_password(password, account.password_hash):
         raise HTTPException(401, "Wrong username or password")
+    if account.disabled:
+        raise HTTPException(403, "This account has been disabled — contact the admin")
     return {"token": make_token(username), "username": username}
 
 
@@ -643,3 +650,109 @@ def revoke_link(
     link.revoked = 1
     session.commit()
     return {"ok": True}
+
+
+# ======================================================================
+# Admin service endpoints — called ONLY by the bot backend (the admin
+# dashboard's gateway), guarded by the same shared SERVICE_KEY as the
+# mint API. Never exposed to browsers directly.
+# ======================================================================
+
+admin_router = APIRouter(prefix="/api/admin", tags=["portal-admin"])
+
+
+def require_service_key(x_service_key: str = Header(default="")) -> None:
+    if SERVICE_KEY and x_service_key != SERVICE_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+@admin_router.get("/accounts", dependencies=[Depends(require_service_key)])
+def admin_list_accounts(session: Session = Depends(get_session)):
+    accounts = session.execute(
+        select(PortalAccount).order_by(PortalAccount.created_at.desc())
+    ).scalars().all()
+    out = []
+    for a in accounts:
+        links = _user_links(session, a.whatsapp_number)
+        out.append({
+            "id": a.id,
+            "username": a.username,
+            "whatsapp_number": a.whatsapp_number,
+            "created_at": a.created_at.isoformat(),
+            "disabled": bool(a.disabled),
+            "avatar": a.avatar,
+            "store_slug": a.store_slug or "",
+            "store_enabled": bool(a.store_enabled),
+            "bank": a.bank,
+            "account_title": a.account_title,
+            "account_number": a.account_number,
+            "links": len(links),
+            "views": sum(l.views for l in links),
+            "clicks": sum(l.clicks for l in links),
+        })
+    return {"accounts": out}
+
+
+@admin_router.post(
+    "/accounts/{account_id}/reset-password",
+    dependencies=[Depends(require_service_key)],
+)
+def admin_reset_password(account_id: int, session: Session = Depends(get_session)):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    temp = "".join(secrets.choice(CODE_ALPHABET) for _ in range(10))
+    account.password_hash = hash_password(temp)
+    session.commit()
+    return {"temp_password": temp, "username": account.username}
+
+
+@admin_router.post(
+    "/accounts/{account_id}/disabled",
+    dependencies=[Depends(require_service_key)],
+)
+async def admin_set_disabled(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    account.disabled = 1 if body.get("disabled") else 0
+    session.commit()
+    return {"disabled": bool(account.disabled)}
+
+
+@admin_router.delete(
+    "/accounts/{account_id}", dependencies=[Depends(require_service_key)]
+)
+def admin_delete_account(account_id: int, session: Session = Depends(get_session)):
+    """Deletes the portal account (number becomes claimable again).
+    The user's links/articles are intentionally kept."""
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    session.delete(account)
+    session.commit()
+    return {"ok": True}
+
+
+@admin_router.get(
+    "/accounts/{account_id}/links", dependencies=[Depends(require_service_key)]
+)
+def admin_account_links(account_id: int, session: Session = Depends(get_session)):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    links = _user_links(session, account.whatsapp_number)
+    return {
+        "links": [
+            {
+                "id": l.id, "marketplace": l.marketplace,
+                "title": l.product.title, "views": l.views, "clicks": l.clicks,
+                "created_at": l.created_at.isoformat(),
+                "article_url": _article_url(l),
+            }
+            for l in links
+        ]
+    }
