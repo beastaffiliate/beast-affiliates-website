@@ -59,8 +59,38 @@ export default function EarningsView() {
         to the bank account saved in your Profile.
       </div>
 
-      <div className="grid grid-2">
+      {data.referrals.length > 0 && (
         <div className="card rise rise-3">
+          <h3 className="heading" style={{ marginBottom: 12 }}>Referral rewards</h3>
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Referred</th>
+                  <th>Reward</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.referrals.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.referred_name}</td>
+                    <td style={{ color: "var(--success)", fontWeight: 700 }}>
+                      +{fmtRs(r.amount)}
+                    </td>
+                    <td className="caption muted" style={{ whiteSpace: "nowrap" }}>
+                      {new Date(r.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-2">
+        <div className="card rise rise-4">
           <h3 className="heading" style={{ marginBottom: 12 }}>Earnings history</h3>
           {data.entries.length === 0 ? (
             <p className="muted caption">

@@ -57,6 +57,10 @@ class PortalAccount(Base):
     disabled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Earnings share %. NULL -> the global default rate applies.
     commission_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Purchases attributed to this user's links — admin-entered (Amazon does
+    # not tell us this; the admin reads it from their dashboard). Shown in the
+    # user's Overview alongside views/clicks.
+    orders: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class WaLinkCode(Base):
@@ -91,6 +95,7 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS account_number VARCHAR(64) DEFAULT ''",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS disabled INTEGER DEFAULT 0",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS commission_rate INTEGER",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS orders INTEGER DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -595,6 +600,7 @@ def overview(
     return {
         "totals": {
             "views": total_views, "clicks": total_clicks, "links": len(links),
+            "orders": account.orders,
             "conversion": round(100 * total_clicks / total_views, 1) if total_views else 0.0,
         },
         "today": {"views": today_views, "clicks": today_clicks,
@@ -692,8 +698,27 @@ def admin_list_accounts(session: Session = Depends(get_session)):
             "links": len(links),
             "views": sum(l.views for l in links),
             "clicks": sum(l.clicks for l in links),
+            "orders": a.orders,
         })
     return {"accounts": out}
+
+
+@admin_router.post(
+    "/accounts/{account_id}/orders", dependencies=[Depends(require_service_key)]
+)
+async def admin_set_orders(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    orders = int(body.get("orders", 0))
+    if orders < 0:
+        raise HTTPException(422, "Orders cannot be negative")
+    account.orders = orders
+    session.commit()
+    return {"orders": account.orders}
 
 
 @admin_router.post(
@@ -868,10 +893,33 @@ class PayoutRecord(Base):
     paid_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Referral(Base):
+    """A reward the admin grants a referrer for bringing in another person.
+    The referred party is either a portal account or a free-text name.
+    The amount is added to the REFERRER's earnings/balance."""
+
+    __tablename__ = "referrals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    referrer_account_id: Mapped[int] = mapped_column(Integer, index=True)
+    referred_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    referred_name: Mapped[str] = mapped_column(String(120), default="")
+    amount: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 def _effective_rate(session: Session, account: PortalAccount) -> int:
     if account.commission_rate is not None:
         return account.commission_rate
     return int(get_setting(session, "default_rate"))
+
+
+def _referral_total(session: Session, account_id: int) -> int:
+    rows = session.execute(
+        select(Referral).where(Referral.referrer_account_id == account_id)
+    ).scalars().all()
+    return sum(r.amount for r in rows)
 
 
 def _earnings_summary(session: Session, account: PortalAccount) -> dict:
@@ -881,10 +929,11 @@ def _earnings_summary(session: Session, account: PortalAccount) -> dict:
     payouts = session.execute(
         select(PayoutRecord).where(PayoutRecord.account_id == account.id)
     ).scalars().all()
-    earned = sum(e.net_amount for e in entries)
+    referrals = _referral_total(session, account.id)
+    earned = sum(e.net_amount for e in entries) + referrals
     paid = sum(p.amount for p in payouts)
     return {"earned": earned, "paid": paid, "balance": earned - paid,
-            "entries_count": len(entries)}
+            "entries_count": len(entries), "referral_total": referrals}
 
 
 # ----------------------------------------------------- admin (service key)
@@ -997,7 +1046,78 @@ def admin_earnings_detail(account_id: int, session: Session = Depends(get_sessio
              "note": p.note, "paid_at": p.paid_at.isoformat()}
             for p in payouts
         ],
+        "referrals": _referrals_for(session, account.id),
     }
+
+
+def _referral_name(session: Session, ref: "Referral") -> str:
+    if ref.referred_account_id is not None:
+        acc = session.get(PortalAccount, ref.referred_account_id)
+        if acc is not None:
+            return f"@{acc.username}"
+    return ref.referred_name or "(unknown)"
+
+
+def _referrals_for(session: Session, account_id: int) -> list[dict]:
+    rows = session.execute(
+        select(Referral)
+        .where(Referral.referrer_account_id == account_id)
+        .order_by(Referral.created_at.desc())
+    ).scalars().all()
+    return [
+        {"id": r.id, "referred_name": _referral_name(session, r),
+         "amount": r.amount, "note": r.note,
+         "created_at": r.created_at.isoformat()}
+        for r in rows
+    ]
+
+
+@admin_router.post(
+    "/earnings/{account_id}/referrals", dependencies=[Depends(require_service_key)]
+)
+async def admin_add_referral(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    referrer = session.get(PortalAccount, account_id)
+    if referrer is None:
+        raise HTTPException(404, "Referrer account not found")
+    body = await _body(request)
+    amount = int(body.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(422, "Referral amount (PKR) must be positive")
+    referred_account_id = body.get("referred_account_id")
+    referred_name = str(body.get("referred_name", "")).strip()[:120]
+    if referred_account_id is not None:
+        referred_account_id = int(referred_account_id)
+        if session.get(PortalAccount, referred_account_id) is None:
+            raise HTTPException(404, "Referred account not found")
+    elif not referred_name:
+        raise HTTPException(422, "Pick a referred user or enter a name")
+    ref = Referral(
+        referrer_account_id=account_id,
+        referred_account_id=referred_account_id,
+        referred_name=referred_name,
+        amount=amount,
+        note=str(body.get("note", "")).strip()[:200],
+    )
+    session.add(ref)
+    session.commit()
+    return {"id": ref.id, "amount": amount}
+
+
+@admin_router.delete(
+    "/earnings/{account_id}/referrals/{referral_id}",
+    dependencies=[Depends(require_service_key)],
+)
+def admin_delete_referral(
+    account_id: int, referral_id: int, session: Session = Depends(get_session)
+):
+    ref = session.get(Referral, referral_id)
+    if ref is None or ref.referrer_account_id != account_id:
+        raise HTTPException(404, "Referral not found")
+    session.delete(ref)
+    session.commit()
+    return {"ok": True}
 
 
 @admin_router.post(
@@ -1119,6 +1239,11 @@ def my_earnings(
         "paid": summary["paid"],
         "balance": summary["balance"],
         "min_payout": int(get_setting(session, "min_payout")),
+        "referrals": [
+            {"referred_name": r["referred_name"], "amount": r["amount"],
+             "created_at": r["created_at"]}
+            for r in _referrals_for(session, account.id)
+        ],
         "entries": [
             {"kind": e.kind, "amount": e.net_amount, "label": e.label,
              "created_at": e.created_at.isoformat()}

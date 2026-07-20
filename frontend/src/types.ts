@@ -20,7 +20,7 @@ export interface SeriesDay {
 }
 
 export interface Overview {
-  totals: { views: number; clicks: number; links: number; conversion: number };
+  totals: { views: number; clicks: number; links: number; orders: number; conversion: number };
   today: { views: number; clicks: number; links: number };
   week: { views: number; clicks: number };
   series: SeriesDay[];
@@ -56,6 +56,7 @@ export interface MyEarnings {
   paid: number;
   balance: number;
   min_payout: number;
+  referrals: { referred_name: string; amount: number; created_at: string }[];
   entries: { kind: string; amount: number; label: string; created_at: string }[];
   payouts: { amount: number; paid_at: string; note: string }[];
 }

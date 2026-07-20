@@ -93,11 +93,15 @@ export default function OverviewView() {
 
   return (
     <div className="grid" style={{ gap: 24 }}>
-      <div className="grid grid-4">
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+      >
         {(
           [
             ["Views", data.totals.views, "", "stat-blue"],
             ["Clicks", data.totals.clicks, "", "stat-green"],
+            ["Orders", data.totals.orders, "", "stat-violet"],
             ["Links", data.totals.links, "", "stat-cream"],
             ["Conversion", data.totals.conversion, "%", "stat-peach"],
           ] as [string, number, string, string][]

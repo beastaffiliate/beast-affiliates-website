@@ -108,6 +108,8 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; 
 .stat-green .stat-number { color: #0d7a43; }
 .stat-peach { background: #fff1e7; border: 0; }
 .stat-peach .stat-number { color: #c2571b; }
+.stat-violet { background: #f1eefc; border: 0; }
+.stat-violet .stat-number { color: #6d4fc2; }
 
 .rank {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
