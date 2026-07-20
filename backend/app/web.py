@@ -238,17 +238,10 @@ async def claim_wa_code(
 
 @app.get("/api/demo")
 def demo_data():
-    """Public (no-auth) content for the demo homepage — dummy stats + the
-    hardcoded demo articles. Nothing here is in the database."""
-    return {
-        "overview": demo_mod.DEMO_OVERVIEW,
-        "articles": [
-            {"id": a["id"], "slug": a["slug"], "title": a["title"],
-             "image_url": a["image_url"], "marketplace": a["marketplace"],
-             "rating": a["rating"]}
-            for a in demo_mod.DEMO_ARTICLES
-        ],
-    }
+    """Public (no-auth) full portal dataset for demo mode — dummy data for
+    every tab (profile, overview, links, earnings, WhatsApp). Nothing here
+    is in the database, so it never appears in admin/analytics."""
+    return demo_mod.DEMO_PORTAL
 
 
 def _render_demo_article(art: dict) -> HTMLResponse:

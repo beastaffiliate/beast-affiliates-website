@@ -132,3 +132,88 @@ DEMO_OVERVIEW = {
         ]
     ],
 }
+
+
+# ---- Full portal dataset for demo mode (every tab, dummy data) ----
+_VC = [(312, 88), (240, 64), (198, 51), (156, 39), (97, 22), (63, 15)]
+_DATES = ["2026-07-20", "2026-07-19", "2026-07-18", "2026-07-16",
+          "2026-07-14", "2026-07-12"]
+
+DEMO_LINKS = [
+    {
+        "id": a["id"], "slug": a["slug"], "marketplace": a["marketplace"],
+        "title": a["title"], "image_url": a["image_url"],
+        "views": v, "clicks": c, "revoked": False,
+        "created_at": f"{d}T10:00:00",
+        "article_url": f"/p/{a['id']}/{a['slug']}",
+        "tagged_url": a["amazon_url"],
+    }
+    for a, (v, c), d in zip(DEMO_ARTICLES, _VC, _DATES)
+]
+
+_TOTAL_V = sum(v for v, _ in _VC)
+_TOTAL_C = sum(c for _, c in _VC)
+
+DEMO_ME = {
+    "username": "sami",
+    "whatsapp_number": "+92 300 1234567",
+    "name": "Sami",
+    "store_name": "Sami Deals",
+    "link_preference": "hub",
+    "avatar": "",
+    "store_slug": "sami-deals",
+    "store_enabled": True,
+    "bank": "Easypaisa",
+    "account_title": "Sami",
+    "account_number": "0300 1234567",
+}
+
+DEMO_EARNINGS = {
+    "earned": 24800,
+    "paid": 15000,
+    "balance": 9800,
+    "min_payout": 5000,
+    "referrals": [
+        {"referred_name": "@ahmed", "amount": 1000, "created_at": "2026-07-15T10:00:00"},
+        {"referred_name": "Bilal", "amount": 500, "created_at": "2026-07-09T10:00:00"},
+    ],
+    "entries": [
+        {"kind": "earning", "amount": 18500, "label": "July 2026", "created_at": "2026-07-18T10:00:00"},
+        {"kind": "bonus", "amount": 800, "label": "Welcome bonus", "created_at": "2026-07-10T10:00:00"},
+        {"kind": "adjustment", "amount": -500, "label": "Return clawback", "created_at": "2026-07-08T10:00:00"},
+        {"kind": "earning", "amount": 4500, "label": "June 2026", "created_at": "2026-06-30T10:00:00"},
+    ],
+    "payouts": [
+        {"amount": 15000, "paid_at": "2026-07-05T10:00:00", "note": "June payout"},
+    ],
+}
+
+DEMO_WA = {
+    "primary": "+92 300 1234567",
+    "linked": ["+92 321 9876543"],
+    "max": 3,
+    "bot_number": "+923489712640",
+}
+
+DEMO_PORTAL = {
+    "me": DEMO_ME,
+    "overview": {
+        "totals": {"views": _TOTAL_V, "clicks": _TOTAL_C, "orders": 41,
+                   "links": len(DEMO_LINKS),
+                   "conversion": round(100 * _TOTAL_C / _TOTAL_V, 1)},
+        "today": {"views": 47, "clicks": 12, "links": 1},
+        "week": {"views": 318, "clicks": 96},
+        "series": DEMO_OVERVIEW["series"],
+        "top": DEMO_LINKS[:5],
+        "recent": DEMO_LINKS[:6],
+    },
+    "links": DEMO_LINKS,
+    "earnings": DEMO_EARNINGS,
+    "wa": DEMO_WA,
+    "articles": [
+        {"id": a["id"], "slug": a["slug"], "title": a["title"],
+         "image_url": a["image_url"], "marketplace": a["marketplace"],
+         "rating": a["rating"]}
+        for a in DEMO_ARTICLES
+    ],
+}
