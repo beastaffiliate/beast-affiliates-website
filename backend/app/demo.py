@@ -192,7 +192,7 @@ DEMO_WA = {
     "primary": "+92 300 1234567",
     "linked": ["+92 321 9876543"],
     "max": 3,
-    "bot_number": "+923489712640",
+    "bot_number": "+92 300 0000000",
 }
 
 DEMO_PORTAL = {

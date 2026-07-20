@@ -21,9 +21,10 @@ export default function App() {
   const demo = !authed && !showAuth;
 
   // Toggle the api layer between real endpoints and dummy demo data.
-  useEffect(() => {
-    setDemoMode(demo);
-  }, [demo]);
+  // Set synchronously during render (not in an effect) so it is already in
+  // effect before child views mount and fire their data calls — otherwise
+  // the first view (Overview) would call the real endpoint and 401.
+  setDemoMode(demo);
 
   const refreshMe = useCallback(() => {
     api.me().then(setMe).catch(() => {});
