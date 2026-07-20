@@ -60,3 +60,11 @@ export interface MyEarnings {
   entries: { kind: string; amount: number; label: string; created_at: string }[];
   payouts: { amount: number; paid_at: string; note: string }[];
 }
+
+export interface DemoData {
+  overview: {
+    totals: { views: number; clicks: number; orders: number; links: number; conversion: number };
+    series: { date: string; views: number; clicks: number }[];
+  };
+  articles: { id: string; slug: string; title: string; image_url: string; marketplace: string; rating: string }[];
+}

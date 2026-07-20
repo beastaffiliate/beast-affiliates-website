@@ -3,7 +3,13 @@ import { api, setToken } from "../api";
 
 type Step = "number" | "signup" | "login";
 
-export default function AuthView({ onAuthed }: { onAuthed: () => void }) {
+export default function AuthView({
+  onAuthed,
+  onBack,
+}: {
+  onAuthed: () => void;
+  onBack?: () => void;
+}) {
   const [step, setStep] = useState<Step>("number");
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
@@ -66,6 +72,15 @@ export default function AuthView({ onAuthed }: { onAuthed: () => void }) {
           <p className="muted caption" style={{ marginTop: 4 }}>
             Share links. Track clicks. Earn commissions.
           </p>
+          {onBack && (
+            <button
+              className="pill pill-secondary pill-sm"
+              style={{ marginTop: 12 }}
+              onClick={onBack}
+            >
+              ← Back to site
+            </button>
+          )}
         </div>
 
         <div className="card rise rise-1" style={{ boxShadow: "rgba(0,0,0,0.1) 0 0 32px 0", border: 0 }}>

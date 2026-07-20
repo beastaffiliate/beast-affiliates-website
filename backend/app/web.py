@@ -27,6 +27,7 @@ from .config import (
 )
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
+from . import demo as demo_mod
 from .portal import PortalAccount, WaLinkCode, run_portal_migrations
 from .portal import admin_router as portal_admin_router
 from .portal import router as portal_router
@@ -235,9 +236,88 @@ async def claim_wa_code(
     return {"primary_number": account.whatsapp_number}
 
 
+@app.get("/api/demo")
+def demo_data():
+    """Public (no-auth) content for the demo homepage — dummy stats + the
+    hardcoded demo articles. Nothing here is in the database."""
+    return {
+        "overview": demo_mod.DEMO_OVERVIEW,
+        "articles": [
+            {"id": a["id"], "slug": a["slug"], "title": a["title"],
+             "image_url": a["image_url"], "marketplace": a["marketplace"],
+             "rating": a["rating"]}
+            for a in demo_mod.DEMO_ARTICLES
+        ],
+    }
+
+
+def _render_demo_article(art: dict) -> HTMLResponse:
+    from .articlegen import generate_copy
+
+    copy = generate_copy(art["title"], art["bullets"], art.get("rating", ""),
+                         art.get("price", ""))
+    others = [a for a in demo_mod.DEMO_ARTICLES if a["id"] != art["id"]][:4]
+    store = "Beast Affiliates"
+    also_items = "".join(
+        f"<div class='item'><img src='{esc(o['image_url'])}' alt=''>"
+        f"<div>{esc(o['title'][:48])}"
+        f"<a href='/p/{o['id']}/{o['slug']}'>View product →</a></div></div>"
+        for o in others
+    )
+    readers_also = (
+        f"<div class='crossbar'><div><span>Readers also viewed</span>"
+        f"<a href='/p/{others[0]['id']}/{others[0]['slug']}'>"
+        f"{esc(others[0]['title'][:70])}</a></div><div>→</div></div>"
+        if others else ""
+    )
+    pros = "".join(f"<li>{esc(p)}</li>" for p in copy["pros"])
+    cons = "".join(f"<li>{esc(c)}</li>" for c in copy["cons"])
+    ideal = "".join(f"<li>{esc(i)}</li>" for i in copy["ideal"])
+    tips = "".join(f"<li>{esc(t)}</li>" for t in copy["tips"])
+    body = f"""
+<header><div class='brand'><div class='logo'>{esc(store[:1].upper())}</div>{esc(store)}</div>
+<a href='#disclosure'>Affiliate Disclosure</a></header>
+<div class='wrap'>
+  <h1>{esc(art['title'][:90])}</h1>
+  <a class='cta cta-mobile' href='/go/{art['id']}' rel='nofollow sponsored'>View on Amazon</a>
+  <div class='grid'>
+    <div>
+      <div class='imgcard'><img src='{esc(art['image_url'])}' alt='{esc(art['title'][:60])}'></div>
+      <section>
+        <h2>A closer look at {esc(art['title'][:60])}</h2>
+        <p>{esc(copy['para1'])}</p>
+        {f"<p>{esc(copy['para2'])}</p>" if copy['para2'] else ""}
+      </section>
+      {readers_also}
+      <div class='box'>
+        <h3>What We Like &amp; What to Consider</h3>
+        <div class='cols'>
+          <div class='pros'><h4>✓ PROS</h4><ul>{pros}</ul></div>
+          <div class='cons'><h4>✗ CONS</h4><ul>{cons}</ul></div>
+        </div>
+      </div>
+      <div class='box'><h3>Ideal For</h3><ul>{ideal}</ul></div>
+      <div class='box'><h3>Worth Knowing</h3><ul>{tips}</ul></div>
+    </div>
+    <div class='side'>
+      <a class='cta' href='/go/{art['id']}' rel='nofollow sponsored'>View on Amazon</a>
+      <div class='note' id='disclosure'><b>Affiliate Link:</b> We earn a small
+        commission when you buy through this link — at no extra cost to you.</div>
+      <div class='note'><b>Note:</b> Product prices and availability are subject
+        to change. Final prices are determined by the retailer at checkout.</div>
+      <div class='also'><h3>You May Also Like</h3>{also_items}</div>
+    </div>
+  </div>
+</div>"""
+    return HTMLResponse(page(art["title"][:70], body))
+
+
 @app.get("/p/{link_id}/{slug}", response_class=HTMLResponse)
 def article(link_id: str, slug: str, request: Request,
             session: Session = Depends(get_session)):
+    demo_art = demo_mod.DEMO_BY_ID.get(link_id)
+    if demo_art is not None:
+        return _render_demo_article(demo_art)
     link = session.get(Link, link_id)
     if link is not None and not link.revoked:
         # Canonical-domain enforcement: US articles live on the US domain,
@@ -462,6 +542,11 @@ def beacon(link_id: str, request: Request, session: Session = Depends(get_sessio
 
 @app.get("/go/{link_id}")
 def go(link_id: str, request: Request, session: Session = Depends(get_session)):
+    demo_art = demo_mod.DEMO_BY_ID.get(link_id)
+    if demo_art is not None:
+        # Demo buy button — real Amazon URL with the dummy tag, no counting.
+        return RedirectResponse(demo_art["amazon_url"], status_code=302,
+                                headers={"Cache-Control": "no-store"})
     link = session.get(Link, link_id)
     if link is None or link.revoked:
         return HTMLResponse(page("Not found", "<div class='wrap'><h1>Link not "

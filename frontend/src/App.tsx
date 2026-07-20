@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, getToken, setToken } from "./api";
 import type { Me } from "./types";
 import AuthView from "./views/AuthView";
+import PublicDemo from "./views/PublicDemo";
 import OverviewView from "./views/OverviewView";
 import EarningsView from "./views/EarningsView";
 import WhatsAppView from "./views/WhatsAppView";
@@ -11,6 +12,9 @@ type Tab = "overview" | "earnings" | "whatsapp" | "profile";
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
+  // Not-logged-in visitors see the public demo by default; the Login button
+  // switches to the real auth flow.
+  const [showAuth, setShowAuth] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [me, setMe] = useState<Me | null>(null);
 
@@ -29,7 +33,13 @@ export default function App() {
     else setMe(null);
   }, [authed, refreshMe]);
 
-  if (!authed) return <AuthView onAuthed={() => setAuthed(true)} />;
+  if (!authed) {
+    return showAuth ? (
+      <AuthView onAuthed={() => setAuthed(true)} onBack={() => setShowAuth(false)} />
+    ) : (
+      <PublicDemo onLogin={() => setShowAuth(true)} />
+    );
+  }
 
   const signOut = () => {
     setToken(null);
