@@ -1,20 +1,20 @@
 {
-  "rewrites": [
-    { "source": "/portal/(.*)", "destination": "https://www.beastassociate.com/portal/$1" },
-    { "source": "/api/(.*)", "destination": "https://www.beastassociate.com/api/$1" },
-    { "source": "/p/(.*)", "destination": "https://www.beastassociate.com/p/$1?xfh=us" },
-    { "source": "/go/(.*)", "destination": "https://www.beastassociate.com/go/$1" },
-    { "source": "/b/(.*)", "destination": "https://www.beastassociate.com/b/$1" },
-    { "source": "/u/(.*)", "destination": "https://www.beastassociate.com/u/$1" },
+  "routes": [
+    { "src": "/portal/(.*)", "dest": "https://www.beastassociate.com/portal/$1" },
+    { "src": "/api/(.*)", "dest": "https://www.beastassociate.com/api/$1" },
+    { "src": "/p/(.*)", "dest": "https://www.beastassociate.com/p/$1?xfh=us" },
+    { "src": "/go/(.*)", "dest": "https://www.beastassociate.com/go/$1" },
+    { "src": "/b/(.*)", "dest": "https://www.beastassociate.com/b/$1" },
+    { "src": "/u/(.*)", "dest": "https://www.beastassociate.com/u/$1" },
 
-    { "source": "/", "destination": "https://www.beastassociate.com/?xfh=aff" },
-    { "source": "/articles", "destination": "https://www.beastassociate.com/articles?xfh=aff" },
-    { "source": "/about", "destination": "https://www.beastassociate.com/about?xfh=aff" },
-    { "source": "/contact", "destination": "https://www.beastassociate.com/contact?xfh=aff" },
-    { "source": "/privacy", "destination": "https://www.beastassociate.com/privacy?xfh=aff" },
-    { "source": "/terms", "destination": "https://www.beastassociate.com/terms?xfh=aff" },
-    { "source": "/favicon.png", "destination": "/favicon.png" },
+    { "src": "/", "dest": "https://www.beastassociate.com/?xfh=aff" },
+    {
+      "src": "/(articles|about|contact|privacy|terms)",
+      "dest": "https://www.beastassociate.com/$1?xfh=aff"
+    },
 
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "handle": "filesystem" },
+
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
