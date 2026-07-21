@@ -104,6 +104,7 @@ def create_link(
     sender: str = "",
     fallback_title: str = "",
     fallback_image: str = "",
+    source_link_id: str = "",
 ) -> tuple[Link, str]:
     """Create a hub link for a direct Amazon product URL.
     Returns (link, absolute article URL). Raises LinkCreationError otherwise."""
@@ -111,6 +112,20 @@ def create_link(
     if detected is None:
         raise LinkCreationError("not a recognizable Amazon product URL (no ASIN)")
     marketplace, asin = detected
+
+    # Forwarding YOUR OWN article link back to the bot returns that same
+    # article instead of duplicating it (owner decision 2026-07-21). Someone
+    # else forwarding it still gets their own new article with their tag.
+    if source_link_id and sender:
+        origin = session.get(Link, source_link_id)
+        if (
+            origin is not None
+            and not origin.revoked
+            and origin.sender == sender
+            and origin.marketplace == marketplace
+            and origin.asin == asin
+        ):
+            return origin, f"{article_base(marketplace)}/p/{origin.id}/{origin.slug}"
 
     # Product data is cached per (marketplace, ASIN) — scrape once, reuse for
     # everyone. The article/link ITSELF is always freshly created (owner

@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import service
+from . import amazon_url, service
 from .favicon_asset import FAVICON_PNG_B64
 from .config import (
     ARTICLE_BASE_INTL,
@@ -196,6 +196,7 @@ async def api_create_link(
             sender=str(body.get("sender", "")).strip(),
             fallback_title=str(body.get("fallback_title", "")).strip(),
             fallback_image=str(body.get("fallback_image", "")).strip(),
+            source_link_id=str(body.get("source_link_id", "")).strip(),
         )
     except service.LinkCreationError as e:
         return Response(json.dumps({"error": str(e)}), 422,
@@ -357,6 +358,45 @@ def _render_demo_article(art: dict) -> HTMLResponse:
   </div>
 </div>"""
     return HTMLResponse(page(art["title"][:70], body))
+
+
+@app.get("/api/links/{link_id}/resolve")
+def resolve_link(
+    link_id: str,
+    session: Session = Depends(get_session),
+    x_service_key: str = Header(default=""),
+):
+    """Pure lookup used by the BOT when a user forwards one of our article
+    links: returns the underlying product's plain (untagged) Amazon URL plus
+    the article's owner. Deliberately records NO view/click, so forwarding a
+    link never inflates the original creator's stats."""
+    if SERVICE_KEY and x_service_key != SERVICE_KEY:
+        return Response(json.dumps({"error": "unauthorized"}), 401,
+                        media_type="application/json")
+
+    demo_art = demo_mod.DEMO_BY_ID.get(link_id)
+    if demo_art is not None:
+        return {
+            "link_id": link_id, "marketplace": demo_art["marketplace"],
+            "asin": demo_art["asin"], "sender": "",
+            "amazon_url": amazon_url.canonical_tagged_url(
+                demo_art["amazon_url"], demo_art["marketplace"], demo_art["asin"], ""
+            ),
+        }
+
+    link = session.get(Link, link_id)
+    if link is None:
+        return Response(json.dumps({"error": "not found"}), 404,
+                        media_type="application/json")
+    return {
+        "link_id": link.id,
+        "marketplace": link.marketplace,
+        "asin": link.asin,
+        "sender": link.sender,
+        "amazon_url": amazon_url.canonical_tagged_url(
+            link.tagged_url, link.marketplace, link.asin, ""
+        ),
+    }
 
 
 @app.get("/p/{link_id}/{slug}", response_class=HTMLResponse)
