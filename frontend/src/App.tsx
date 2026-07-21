@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, getToken, setToken, setDemoMode } from "./api";
+import { api, getToken, setToken } from "./api";
 import type { Me } from "./types";
 import AuthView from "./views/AuthView";
 import OverviewView from "./views/OverviewView";
@@ -11,20 +11,8 @@ type Tab = "overview" | "earnings" | "whatsapp" | "profile";
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getToken());
-  // Not-logged-in visitors explore the real portal in demo mode; the Login
-  // button switches to the auth flow.
-  const [showAuth, setShowAuth] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [me, setMe] = useState<Me | null>(null);
-  const [popup, setPopup] = useState(false);
-
-  const demo = !authed && !showAuth;
-
-  // Toggle the api layer between real endpoints and dummy demo data.
-  // Set synchronously during render (not in an effect) so it is already in
-  // effect before child views mount and fire their data calls — otherwise
-  // the first view (Overview) would call the real endpoint and 401.
-  setDemoMode(demo);
 
   const refreshMe = useCallback(() => {
     api.me().then(setMe).catch(() => {});
@@ -37,25 +25,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (authed || demo) refreshMe();
+    if (authed) refreshMe();
     else setMe(null);
-  }, [authed, demo, refreshMe]);
+  }, [authed, refreshMe]);
 
-  // Demo login popup every 2 minutes; closing hides it until the next tick.
-  useEffect(() => {
-    if (!demo) return;
-    const t = setInterval(() => setPopup(true), 120000);
-    return () => clearInterval(t);
-  }, [demo]);
-
-  if (!authed && showAuth) {
+  if (!authed) {
     return (
       <AuthView
-        onAuthed={() => {
-          setShowAuth(false);
-          setAuthed(true);
+        onAuthed={() => setAuthed(true)}
+        // Leaves the SPA for the public marketing site (server-rendered).
+        onBack={() => {
+          window.location.href = "/";
         }}
-        onBack={() => setShowAuth(false)}
       />
     );
   }
@@ -64,10 +45,6 @@ export default function App() {
     setToken(null);
     setAuthed(false);
     setTab("overview");
-  };
-  const goLogin = () => {
-    setPopup(false);
-    setShowAuth(true);
   };
 
   return (
@@ -111,15 +88,9 @@ export default function App() {
               <strong style={{ fontSize: 14 }}>{me.username}</strong>
             </button>
           )}
-          {demo ? (
-            <button className="pill pill-primary pill-sm" onClick={goLogin}>
-              Log in / Sign up
-            </button>
-          ) : (
-            <button className="pill pill-secondary pill-sm" onClick={signOut}>
-              Sign out
-            </button>
-          )}
+          <button className="pill pill-secondary pill-sm" onClick={signOut}>
+            Sign out
+          </button>
         </div>
       </nav>
 
@@ -135,35 +106,6 @@ export default function App() {
         © 2026 All rights reserved
       </footer>
 
-      {demo && popup && (
-        <div className="modal-overlay" onClick={() => setPopup(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setPopup(false)} aria-label="Close">
-              ×
-            </button>
-            <div style={{ textAlign: "center" }}>
-              <img src="/logo-icon.png" alt="" style={{ height: 46, marginBottom: 10 }} />
-              <h3 className="heading" style={{ marginBottom: 6 }}>
-                Access your dashboard
-              </h3>
-              <p className="muted caption" style={{ marginBottom: 20 }}>
-                Log in to create links, track your clicks and orders, and see
-                your earnings.
-              </p>
-              <button className="pill pill-primary" style={{ width: "100%" }} onClick={goLogin}>
-                Log in / Sign up
-              </button>
-              <button
-                className="pill pill-secondary pill-sm"
-                style={{ marginTop: 10 }}
-                onClick={() => setPopup(false)}
-              >
-                Keep browsing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

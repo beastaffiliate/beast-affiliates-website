@@ -28,6 +28,7 @@ from .config import (
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
 from . import demo as demo_mod
+from . import site
 from .portal import PortalAccount, WaLinkCode, run_portal_migrations
 from .portal import admin_router as portal_admin_router
 from .portal import router as portal_router
@@ -234,6 +235,59 @@ async def claim_wa_code(
     row.used = 1
     session.commit()
     return {"primary_number": account.whatsapp_number}
+
+
+# ------------------------------------------------- public marketing website
+# Server-rendered so BOTH domains share one implementation: beastassociate.com
+# serves these directly, beastaffiliates.com proxies them (see frontend
+# vercel.json). `?brand=` is a local preview override for the alternate skin.
+
+
+def _site_ctx(request: Request, brand: str = ""):
+    # Requests proxied from beastaffiliates.com carry ?xfh=aff because the
+    # proxy rewrites the Host header to ours.
+    if request.query_params.get("xfh") == "aff":
+        return site.brand_for("", "affiliates"), "www.beastaffiliates.com"
+    host = (
+        request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    ).split(",")[0].strip()
+    return site.brand_for(host, brand), host
+
+
+@app.get("/", response_class=HTMLResponse)
+def site_home(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.home(b, host))
+
+
+@app.get("/articles", response_class=HTMLResponse)
+def site_articles(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.articles(b, host))
+
+
+@app.get("/about", response_class=HTMLResponse)
+def site_about(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.about(b, host))
+
+
+@app.get("/contact", response_class=HTMLResponse)
+def site_contact(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.contact(b, host))
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def site_privacy(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.privacy(b, host))
+
+
+@app.get("/terms", response_class=HTMLResponse)
+def site_terms(request: Request, brand: str = ""):
+    b, host = _site_ctx(request, brand)
+    return HTMLResponse(site.terms(b, host))
 
 
 @app.get("/api/demo")
@@ -563,7 +617,7 @@ def go(link_id: str, request: Request, session: Session = Depends(get_session)):
 # ------------------------------------------------- dev/test create form (GET /)
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/tester", response_class=HTMLResponse)
 def index(session: Session = Depends(get_session), error: str = "",
           created: str = "", src: str = ""):
     rows = session.execute(
