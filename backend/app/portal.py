@@ -1159,6 +1159,72 @@ async def admin_add_entry(
     return {"id": entry.id, "net_amount": net, "rate_applied": rate}
 
 
+@admin_router.put(
+    "/earnings/{account_id}/entries/{entry_id}",
+    dependencies=[Depends(require_service_key)],
+)
+async def admin_update_entry(
+    account_id: int,
+    entry_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Edit an existing entry in place — kind, label, gross, rate, share and
+    date. Share is normally gross x rate, but it is stored as sent so the
+    admin can record what Amazon actually paid when the two disagree."""
+    entry = session.get(EarningsEntry, entry_id)
+    if entry is None or entry.account_id != account_id:
+        raise HTTPException(404, "Entry not found")
+    body = await _body(request)
+
+    kind = str(body.get("kind", entry.kind))
+    if kind not in ("earning", "bonus", "adjustment"):
+        raise HTTPException(422, "Invalid kind")
+
+    if "label" in body:
+        label = str(body["label"]).strip()[:80]
+        if not label:
+            raise HTTPException(422, "Label is required (e.g. 'July 2026')")
+        entry.label = label
+    if "note" in body:
+        entry.note = str(body["note"]).strip()[:200]
+    if "created_at" in body and str(body["created_at"]).strip():
+        raw = str(body["created_at"]).strip()
+        try:
+            entry.created_at = datetime.fromisoformat(
+                raw if len(raw) > 10 else raw + "T00:00:00"
+            )
+        except ValueError:
+            raise HTTPException(422, "Date must be YYYY-MM-DD")
+
+    if kind == "earning":
+        gross = int(body["gross_amount"]) if "gross_amount" in body else entry.gross_amount
+        rate = int(body["rate_applied"]) if "rate_applied" in body else entry.rate_applied
+        if gross <= 0:
+            raise HTTPException(422, "Gross amount (PKR) must be positive")
+        if not 0 <= rate <= 100:
+            raise HTTPException(422, "Rate must be between 0 and 100")
+        net = int(body["net_amount"]) if "net_amount" in body else round(gross * rate / 100)
+        if net < 0:
+            raise HTTPException(422, "Share cannot be negative")
+        entry.gross_amount, entry.rate_applied, entry.net_amount = gross, rate, net
+    else:
+        # Bonus/adjustment carry a direct amount; gross and rate don't apply.
+        net = int(body["net_amount"]) if "net_amount" in body else entry.net_amount
+        if net == 0:
+            raise HTTPException(422, "Amount cannot be zero")
+        if kind == "bonus" and net < 0:
+            raise HTTPException(422, "Bonus must be positive")
+        entry.gross_amount, entry.rate_applied, entry.net_amount = 0, 0, net
+
+    entry.kind = kind
+    session.commit()
+    return {"id": entry.id, "kind": entry.kind, "gross_amount": entry.gross_amount,
+            "rate_applied": entry.rate_applied, "net_amount": entry.net_amount,
+            "label": entry.label, "note": entry.note,
+            "created_at": entry.created_at.isoformat()}
+
+
 @admin_router.delete(
     "/earnings/{account_id}/entries/{entry_id}",
     dependencies=[Depends(require_service_key)],
