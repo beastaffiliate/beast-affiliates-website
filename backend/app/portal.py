@@ -1254,3 +1254,92 @@ def my_earnings(
             for p in payouts
         ],
     }
+
+
+@admin_router.put(
+    "/earnings/{account_id}/referrals/{referral_id}",
+    dependencies=[Depends(require_service_key)],
+)
+async def admin_update_referral(
+    account_id: int,
+    referral_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Referral rewards change over time, so the admin can edit the amount,
+    note, date and who was referred without deleting the record."""
+    ref = session.get(Referral, referral_id)
+    if ref is None or ref.referrer_account_id != account_id:
+        raise HTTPException(404, "Referral not found")
+    body = await _body(request)
+
+    if "amount" in body:
+        amount = int(body["amount"])
+        if amount <= 0:
+            raise HTTPException(422, "Referral amount (PKR) must be positive")
+        ref.amount = amount
+    if "note" in body:
+        ref.note = str(body["note"]).strip()[:200]
+    if "created_at" in body and str(body["created_at"]).strip():
+        raw = str(body["created_at"]).strip()
+        try:
+            ref.created_at = datetime.fromisoformat(
+                raw if len(raw) > 10 else raw + "T00:00:00"
+            )
+        except ValueError:
+            raise HTTPException(422, "Date must be YYYY-MM-DD")
+    if "referred_account_id" in body or "referred_name" in body:
+        rid = body.get("referred_account_id")
+        name = str(body.get("referred_name", "")).strip()[:120]
+        if rid:
+            rid = int(rid)
+            if session.get(PortalAccount, rid) is None:
+                raise HTTPException(404, "Referred account not found")
+            if rid == account_id:
+                raise HTTPException(422, "A user cannot refer themselves")
+            ref.referred_account_id, ref.referred_name = rid, ""
+        elif name:
+            ref.referred_account_id, ref.referred_name = None, name
+        else:
+            raise HTTPException(422, "Pick a referred user or enter a name")
+
+    session.commit()
+    return {"id": ref.id, "amount": ref.amount, "note": ref.note,
+            "referred_name": _referral_name(session, ref),
+            "created_at": ref.created_at.isoformat()}
+
+
+@admin_router.post("/accounts", dependencies=[Depends(require_service_key)])
+async def admin_create_account(
+    request: Request, session: Session = Depends(get_session)
+):
+    """Admin creates a portal account on a user's behalf (credentials shared
+    with them separately). Self-signup still works for anyone not yet created."""
+    body = await _body(request)
+    number = _norm_number(str(body.get("whatsapp_number", "")))
+    username = str(body.get("username", "")).strip().lower()
+    password = str(body.get("password", ""))
+
+    if len(number) < 6:
+        raise HTTPException(422, "A valid WhatsApp number is required")
+    if not (3 <= len(username) <= 32) or not username.replace("_", "").isalnum():
+        raise HTTPException(422, "Username: 3-32 letters, numbers or underscores")
+    if len(password) < 8:
+        raise HTTPException(422, "Password must be at least 8 characters")
+    if session.execute(
+        select(PortalAccount).where(PortalAccount.whatsapp_number == number)
+    ).scalar_one_or_none():
+        raise HTTPException(409, "This number already has a portal account")
+    if session.execute(
+        select(PortalAccount).where(PortalAccount.username == username)
+    ).scalar_one_or_none():
+        raise HTTPException(409, "Username is taken")
+
+    account = PortalAccount(
+        whatsapp_number=number, username=username,
+        password_hash=hash_password(password),
+    )
+    session.add(account)
+    session.commit()
+    return {"id": account.id, "username": account.username,
+            "whatsapp_number": account.whatsapp_number}
