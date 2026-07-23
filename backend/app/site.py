@@ -10,9 +10,10 @@ The affiliate portal itself is the React SPA at /dashboard.
 
 import html as htmllib
 
-from .demo import DEMO_ARTICLES
-
 # ---------------------------------------------------------------- branding
+# `us` decides which marketplaces' articles a domain lists: the affiliates
+# domain shows US articles, the associate domain shows every other country —
+# mirroring where each article physically lives (see config.article_base).
 
 BRANDS = {
     "affiliates": {
@@ -21,6 +22,7 @@ BRANDS = {
         "accent_dark": "#611f69",
         "accent_soft": "#f6ecf7",
         "tagline": "Product recommendations and buying guides to help you shop smarter.",
+        "us": True,
     },
     "associate": {
         "name": "Beast Associate",
@@ -28,6 +30,7 @@ BRANDS = {
         "accent_dark": "#163a5a",
         "accent_soft": "#eaf1f8",
         "tagline": "Independent product research and buying guides for online shoppers.",
+        "us": False,
     },
 }
 
@@ -271,11 +274,11 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
 def _card(a: dict) -> str:
     blurb = (a["bullets"][0] if a.get("bullets") else "")[:130]
     cat = CATEGORIES.get(a["id"], "Product Guide")
-    # Image and the "View on Amazon" action go straight to the retailer via
-    # /go/<id> (tagged affiliate link); "Read more" opens the guide first.
+    # The whole card opens the guide (image, title, Read more all go to /p/).
+    # Amazon is reached only through the explicit "View on Amazon" action here
+    # and the buy button on the guide itself (/go/<id>, the creator's tag).
     return f"""<article class="ac">
-  <a class="thumb" href="/go/{a['id']}" rel="nofollow sponsored" target="_blank"
-     title="View on Amazon">
+  <a class="thumb" href="/p/{a['id']}/{a['slug']}" title="{esc(a['title'][:60])}">
     <img src="{esc(a['image_url'])}" alt="{esc(a['title'][:60])}" loading="lazy"></a>
   <div class="body">
     <div class="meta"><span class="tag">{esc(cat)}</span>
@@ -293,8 +296,15 @@ def _card(a: dict) -> str:
 
 # ------------------------------------------------------------------- pages
 
-def home(brand: dict, host: str) -> str:
-    cards = "".join(_card(a) for a in DEMO_ARTICLES[:6])
+def _empty_state(brand: dict) -> str:
+    return ("<p class='sub' style='margin:8px 0 0'>No product articles have been "
+            "published on {name} yet — please check back soon.</p>").format(
+        name=esc(brand["name"]))
+
+
+def home(brand: dict, host: str, cards_data: list | None = None) -> str:
+    cards_data = cards_data or []
+    cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
     body = f"""
 <section class="hero"><div class="wrap"><div class="hgrid">
   <div>
@@ -361,19 +371,33 @@ def home(brand: dict, host: str) -> str:
     return shell(brand, host, "Best Products & Deals", body, active="/")
 
 
-def articles(brand: dict, host: str) -> str:
-    cards = "".join(_card(a) for a in DEMO_ARTICLES)
-    cats = "".join(
-        f"<span class='tag' style='background:var(--accent-soft);color:var(--accent)'>{esc(c)}</span>"
-        for c in dict.fromkeys(CATEGORIES.values())
+def _pager(page: int, total_pages: int) -> str:
+    if total_pages <= 1:
+        return ""
+    prev = (f"<a class='btn btn-ghost' href='/articles?page={page - 1}'>← Previous</a>"
+            if page > 1 else "<span></span>")
+    nxt = (f"<a class='btn btn-ghost' href='/articles?page={page + 1}'>Next →</a>"
+           if page < total_pages else "<span></span>")
+    return (
+        "<div style='display:flex;justify-content:space-between;align-items:center;"
+        f"gap:12px;margin-top:34px'>{prev}"
+        f"<span style='color:var(--mute);font-size:14px'>Page {page} of {total_pages}"
+        f"</span>{nxt}</div>"
     )
+
+
+def articles(brand: dict, host: str, cards_data: list | None = None,
+             page: int = 1, total_pages: int = 1) -> str:
+    cards_data = cards_data or []
+    cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
     body = f"""
 <section class="band" style="border-top:0"><div class="wrap">
   <h1 style="font-size:40px">Articles &amp; Buying Guides</h1>
-  <p class="sub" style="margin-bottom:18px">Every guide is based on the product
-    listing's own specifications and category details. We update them as listings change.</p>
-  <div class="meta" style="gap:8px;margin-bottom:26px">{cats}</div>
+  <p class="sub" style="margin-bottom:26px">Every guide is based on the product
+    listing's own specifications and category details. The most recent guides
+    appear first.</p>
   <div class="acards">{cards}</div>
+  {_pager(page, total_pages)}
 </div></section>"""
     return shell(brand, host, "Articles & Buying Guides", body, active="/articles")
 

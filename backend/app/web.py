@@ -8,12 +8,13 @@ redirect must never be cached — it increments clicks.
 import base64
 import html as htmllib
 import json
+import math
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import amazon_url, service
@@ -255,16 +256,71 @@ def _site_ctx(request: Request, brand: str = ""):
     return site.brand_for(host, brand), host
 
 
+ARTICLES_PER_PAGE = 24
+
+
+def _article_cards(session: Session, us_domain: bool, limit: int, offset: int):
+    """Real published articles for a domain, one card per product (the most
+    recent article for it), newest first, excluding revoked links.
+
+    US-marketplace articles live on the affiliates domain; every other country
+    on the associate domain. Returns (cards, total_product_count)."""
+    mkt = (Link.marketplace == "US") if us_domain else (Link.marketplace != "US")
+    # Latest article timestamp per product, so a product shows once even when
+    # many users have shared it — the newest share represents it and floats up.
+    latest = (
+        select(Link.product_id, func.max(Link.created_at).label("mx"))
+        .where(Link.revoked == 0, mkt)
+        .group_by(Link.product_id)
+        .subquery()
+    )
+    total = session.execute(select(func.count()).select_from(latest)).scalar_one()
+    rows = session.execute(
+        select(Link)
+        .join(
+            latest,
+            (Link.product_id == latest.c.product_id)
+            & (Link.created_at == latest.c.mx),
+        )
+        .where(Link.revoked == 0)
+        .order_by(latest.c.mx.desc(), Link.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).scalars().all()
+
+    cards, seen = [], set()
+    for link in rows:
+        if link.product_id in seen:  # guard against identical timestamps
+            continue
+        seen.add(link.product_id)
+        p = link.product
+        cards.append({
+            "id": link.id, "slug": link.slug, "title": p.title,
+            "image_url": p.image_url, "rating": p.rating,
+            "bullets": json.loads(p.bullets_json or "[]"),
+        })
+    return cards, total
+
+
 @app.get("/", response_class=HTMLResponse)
-def site_home(request: Request, brand: str = ""):
+def site_home(request: Request, brand: str = "",
+              session: Session = Depends(get_session)):
     b, host = _site_ctx(request, brand)
-    return HTMLResponse(site.home(b, host))
+    cards, _ = _article_cards(session, b.get("us", True), limit=6, offset=0)
+    return HTMLResponse(site.home(b, host, cards))
 
 
 @app.get("/articles", response_class=HTMLResponse)
-def site_articles(request: Request, brand: str = ""):
+def site_articles(request: Request, brand: str = "", page: int = 1,
+                  session: Session = Depends(get_session)):
     b, host = _site_ctx(request, brand)
-    return HTMLResponse(site.articles(b, host))
+    page = max(1, page)
+    cards, total = _article_cards(
+        session, b.get("us", True), limit=ARTICLES_PER_PAGE,
+        offset=(page - 1) * ARTICLES_PER_PAGE,
+    )
+    total_pages = max(1, math.ceil(total / ARTICLES_PER_PAGE))
+    return HTMLResponse(site.articles(b, host, cards, page, total_pages))
 
 
 @app.get("/about", response_class=HTMLResponse)
