@@ -1409,3 +1409,77 @@ async def admin_create_account(
     session.commit()
     return {"id": account.id, "username": account.username,
             "whatsapp_number": account.whatsapp_number}
+
+
+@admin_router.get("/backup", dependencies=[Depends(require_service_key)])
+def admin_backup(session: Session = Depends(get_session)):
+    """Full dump of the website's portal + earnings data for the admin backup.
+    Password is a PBKDF2 hash (no plaintext is ever stored) — it enables a
+    restore, it is not a readable password. Bundled with bot-side users +
+    tracking IDs by the bot API before the zip is streamed to the admin."""
+    accounts = session.execute(
+        select(PortalAccount).order_by(PortalAccount.username)
+    ).scalars().all()
+    name_by_id = {a.id: a.username for a in accounts}
+
+    portal_accounts = []
+    earnings_by_user = []
+    for a in accounts:
+        portal_accounts.append({
+            "id": a.id, "username": a.username, "password_hash": a.password_hash,
+            "whatsapp_number": a.whatsapp_number,
+            "created_at": a.created_at.isoformat(),
+            "store_slug": a.store_slug or "", "store_enabled": bool(a.store_enabled),
+            "bank": a.bank, "account_title": a.account_title,
+            "account_number": a.account_number, "disabled": bool(a.disabled),
+            "commission_rate": a.commission_rate, "orders": a.orders,
+        })
+        summary = _earnings_summary(session, a)
+        earnings_by_user.append({
+            "account_id": a.id, "username": a.username,
+            "whatsapp_number": a.whatsapp_number,
+            "rate": _effective_rate(session, a), "custom_rate": a.commission_rate,
+            "earned": summary["earned"], "paid": summary["paid"],
+            "balance": summary["balance"], "entries_count": summary["entries_count"],
+            "referral_total": summary["referral_total"],
+        })
+
+    entries = session.execute(
+        select(EarningsEntry).order_by(EarningsEntry.created_at)
+    ).scalars().all()
+    payouts = session.execute(
+        select(PayoutRecord).order_by(PayoutRecord.paid_at)
+    ).scalars().all()
+    referrals = session.execute(
+        select(Referral).order_by(Referral.created_at)
+    ).scalars().all()
+
+    return {
+        "portal_accounts": portal_accounts,
+        "earnings_by_user": earnings_by_user,
+        "earnings_entries": [
+            {"id": e.id, "account_id": e.account_id,
+             "username": name_by_id.get(e.account_id, ""), "kind": e.kind,
+             "gross_amount": e.gross_amount, "rate_applied": e.rate_applied,
+             "net_amount": e.net_amount, "label": e.label, "note": e.note,
+             "created_at": e.created_at.isoformat()}
+            for e in entries
+        ],
+        "payout_records": [
+            {"id": p.id, "account_id": p.account_id,
+             "username": name_by_id.get(p.account_id, ""), "amount": p.amount,
+             "method": p.method, "note": p.note, "paid_at": p.paid_at.isoformat()}
+            for p in payouts
+        ],
+        "referrals": [
+            {"id": r.id, "referrer_account_id": r.referrer_account_id,
+             "referrer_username": name_by_id.get(r.referrer_account_id, ""),
+             "referred_name": _referral_name(session, r), "amount": r.amount,
+             "note": r.note, "created_at": r.created_at.isoformat()}
+            for r in referrals
+        ],
+        "settings": {
+            "default_rate": int(get_setting(session, "default_rate")),
+            "min_payout": int(get_setting(session, "min_payout")),
+        },
+    }
