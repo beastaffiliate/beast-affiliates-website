@@ -53,6 +53,23 @@ export default function EarningsView() {
         </div>
       </div>
 
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 20,
+        }}
+      >
+        <div className="card stat-violet rise" style={{ padding: 24 }}>
+          <span className="eyebrow">Orders</span>
+          <div className="stat-number" style={{ fontSize: 38 }}>{data.orders}</div>
+        </div>
+        <div className="card stat-cream rise rise-1" style={{ padding: 24 }}>
+          <span className="eyebrow">Shipped orders</span>
+          <div className="stat-number" style={{ fontSize: 38 }}>{data.shipped_orders}</div>
+        </div>
+      </div>
+
       <div className="banner banner-ok" style={{ marginBottom: 0 }}>
         Payouts are processed from <strong>{fmtRs(data.min_payout)}</strong> —
         once your pending balance reaches that amount, the team sends your money

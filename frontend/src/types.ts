@@ -55,6 +55,8 @@ export interface MyEarnings {
   earned: number;
   paid: number;
   balance: number;
+  orders: number;
+  shipped_orders: number;
   min_payout: number;
   referrals: { referred_name: string; amount: number; created_at: string }[];
   entries: { kind: string; amount: number; label: string; created_at: string }[];

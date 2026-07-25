@@ -61,6 +61,9 @@ class PortalAccount(Base):
     # not tell us this; the admin reads it from their dashboard). Shown in the
     # user's Overview alongside views/clicks.
     orders: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Of those orders, how many have shipped — also admin-entered. Shown to the
+    # user in their Earnings tab next to Orders.
+    shipped_orders: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class WaLinkCode(Base):
@@ -96,6 +99,7 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS disabled INTEGER DEFAULT 0",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS commission_rate INTEGER",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS orders INTEGER DEFAULT 0",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS shipped_orders INTEGER DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -699,6 +703,7 @@ def admin_list_accounts(session: Session = Depends(get_session)):
             "views": sum(l.views for l in links),
             "clicks": sum(l.clicks for l in links),
             "orders": a.orders,
+            "shipped_orders": a.shipped_orders,
         })
     return {"accounts": out}
 
@@ -719,6 +724,24 @@ async def admin_set_orders(
     account.orders = orders
     session.commit()
     return {"orders": account.orders}
+
+
+@admin_router.post(
+    "/accounts/{account_id}/shipped-orders", dependencies=[Depends(require_service_key)]
+)
+async def admin_set_shipped_orders(
+    account_id: int, request: Request, session: Session = Depends(get_session)
+):
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    body = await _body(request)
+    shipped = int(body.get("shipped_orders", 0))
+    if shipped < 0:
+        raise HTTPException(422, "Shipped orders cannot be negative")
+    account.shipped_orders = shipped
+    session.commit()
+    return {"shipped_orders": account.shipped_orders}
 
 
 @admin_router.post(
@@ -1304,6 +1327,8 @@ def my_earnings(
         "earned": summary["earned"],
         "paid": summary["paid"],
         "balance": summary["balance"],
+        "orders": account.orders,
+        "shipped_orders": account.shipped_orders,
         "min_payout": int(get_setting(session, "min_payout")),
         "referrals": [
             {"referred_name": r["referred_name"], "amount": r["amount"],
@@ -1433,6 +1458,7 @@ def admin_backup(session: Session = Depends(get_session)):
             "bank": a.bank, "account_title": a.account_title,
             "account_number": a.account_number, "disabled": bool(a.disabled),
             "commission_rate": a.commission_rate, "orders": a.orders,
+            "shipped_orders": a.shipped_orders,
         })
         summary = _earnings_summary(session, a)
         earnings_by_user.append({
