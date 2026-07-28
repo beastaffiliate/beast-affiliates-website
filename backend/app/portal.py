@@ -1436,6 +1436,56 @@ async def admin_create_account(
             "whatsapp_number": account.whatsapp_number}
 
 
+@admin_router.get("/link-report", dependencies=[Depends(require_service_key)])
+def admin_link_report(days: int = 1, session: Session = Depends(get_session)):
+    """Links generated per day, per sender, for the last `days` UTC days.
+
+    Unlike /performance (which only covers users with a portal account), this
+    reports on EVERY link row regardless of who sent it — the bot API joins the
+    senders against its own users table to name them. Aggregated in Python to
+    sidestep SQLite/Postgres date-function differences, matching the rest of
+    this module."""
+    days = max(1, min(days, 90))
+    today = datetime.utcnow().date()
+    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    window_start = datetime.combine(day_list[0], datetime.min.time())
+
+    links = session.execute(
+        select(Link).where(Link.created_at >= window_start)
+    ).scalars().all()
+
+    wanted = {d.isoformat() for d in day_list}
+    per_day = {d: {"links": 0, "revoked": 0, "senders": {}} for d in wanted}
+    for l in links:
+        key = l.created_at.date().isoformat()
+        bucket = per_day.get(key)
+        if bucket is None:
+            continue  # created today-but-later than the window edge
+        bucket["links"] += 1
+        if l.revoked:
+            bucket["revoked"] += 1
+        bucket["senders"][l.sender] = bucket["senders"].get(l.sender, 0) + 1
+
+    return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "days": [
+            {
+                "date": d,
+                "links": per_day[d]["links"],
+                "revoked": per_day[d]["revoked"],
+                "active_senders": len(per_day[d]["senders"]),
+                "senders": [
+                    {"whatsapp_number": n, "links": c}
+                    for n, c in sorted(
+                        per_day[d]["senders"].items(), key=lambda kv: -kv[1]
+                    )
+                ],
+            }
+            for d in sorted(wanted)
+        ],
+    }
+
+
 @admin_router.get("/backup", dependencies=[Depends(require_service_key)])
 def admin_backup(session: Session = Depends(get_session)):
     """Full dump of the website's portal + earnings data for the admin backup.
