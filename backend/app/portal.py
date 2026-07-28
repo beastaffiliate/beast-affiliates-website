@@ -1437,8 +1437,14 @@ async def admin_create_account(
 
 
 @admin_router.get("/link-report", dependencies=[Depends(require_service_key)])
-def admin_link_report(days: int = 1, session: Session = Depends(get_session)):
-    """Links generated per day, per sender, for the last `days` UTC days.
+def admin_link_report(
+    days: int = 1, tz_offset: int = 0, session: Session = Depends(get_session)
+):
+    """Links generated per day, per sender, for the last `days` days.
+
+    `tz_offset` is minutes ahead of UTC (300 = PKT, UTC+5) and shifts the day
+    boundary so a report sent at local midnight covers the local calendar day,
+    not a UTC one straddling two local days. Timestamps are stored in UTC.
 
     Unlike /performance (which only covers users with a portal account), this
     reports on EVERY link row regardless of who sent it — the bot API joins the
@@ -1446,9 +1452,13 @@ def admin_link_report(days: int = 1, session: Session = Depends(get_session)):
     sidestep SQLite/Postgres date-function differences, matching the rest of
     this module."""
     days = max(1, min(days, 90))
-    today = datetime.utcnow().date()
-    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
-    window_start = datetime.combine(day_list[0], datetime.min.time())
+    tz_offset = max(-840, min(tz_offset, 840))  # -14h..+14h, real-world range
+    shift = timedelta(minutes=tz_offset)
+
+    today_local = (datetime.utcnow() + shift).date()
+    day_list = [today_local - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    # Local midnight of the earliest day, expressed back in UTC for the query.
+    window_start = datetime.combine(day_list[0], datetime.min.time()) - shift
 
     links = session.execute(
         select(Link).where(Link.created_at >= window_start)
@@ -1457,7 +1467,7 @@ def admin_link_report(days: int = 1, session: Session = Depends(get_session)):
     wanted = {d.isoformat() for d in day_list}
     per_day = {d: {"links": 0, "revoked": 0, "senders": {}} for d in wanted}
     for l in links:
-        key = l.created_at.date().isoformat()
+        key = (l.created_at + shift).date().isoformat()
         bucket = per_day.get(key)
         if bucket is None:
             continue  # created today-but-later than the window edge
@@ -1468,6 +1478,7 @@ def admin_link_report(days: int = 1, session: Session = Depends(get_session)):
 
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
+        "tz_offset": tz_offset,
         "days": [
             {
                 "date": d,
