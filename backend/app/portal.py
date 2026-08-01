@@ -83,7 +83,10 @@ class WaLinkCode(Base):
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 CODE_TTL_SECONDS = 180
 BOT_WA_NUMBER = os.getenv("BOT_WA_NUMBER", "+923489712640")
-MAX_WA_NUMBERS = 3  # primary + 2 linked
+MAX_WA_NUMBERS = 6  # primary + 5 linked
+# NOTE: the bot repo enforces the same cap in routers/process.py
+# (MAX_NUMBERS_PER_USER) when a code is claimed over WhatsApp. Both must match,
+# or the portal will offer a slot the bot then refuses to fill.
 
 
 # Startup DDL for databases created before these columns existed (create_all
