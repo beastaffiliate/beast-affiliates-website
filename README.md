@@ -3,7 +3,12 @@
 Companion website for the WhatsApp affiliate bot. Registered users get a
 dashboard (portal) and per-user "hub" article pages whose **View on Amazon**
 button routes through a click-counting redirect to the user's tagged affiliate
-link. Last updated 2026-07-22 — live on both domains.
+link. Last updated 2026-08-02 — live on both domains.
+
+As of 2026-08-02 **48 of the bot's 60 users are on `hub` replies** and 12 on
+`direct`, so this repo is on the critical path for most replies now. The bot's
+fail-safe still holds (a mint failure leaves the tagged Amazon link), but an
+outage here degrades the majority of users rather than a handful.
 
 - `backend/` — FastAPI (managed with **uv**), deployed on Vercel. Serves:
   - the **public marketing site** (`app/site.py`, server-rendered): Home,
@@ -26,9 +31,14 @@ link. Last updated 2026-07-22 — live on both domains.
 
 `products` (per marketplace+ASIN article cache), `links`, `link_events` (raw
 view/click rows), `portal_accounts` (login, avatar, store slug, payout bank
-details, commission_rate, orders, disabled), `wa_link_codes` (3-minute
-single-use WhatsApp linking codes), `portal_settings` (default_rate,
-min_payout), `earnings_entries`, `payout_records`, `referrals`.
+details, commission_rate, orders, **shipped_orders**, disabled),
+`wa_link_codes` (3-minute single-use WhatsApp linking codes), `portal_settings`
+(default_rate, min_payout), `earnings_entries`, `payout_records`, `referrals`.
+
+`MAX_WA_NUMBERS` in `app/portal.py` is **6** (primary + 5 linked) and **must
+stay equal to `MAX_NUMBERS_PER_USER` in the bot's `routers/process.py`** — this
+side shows the allowance and hands out the linking codes, the bot enforces it
+when a code is claimed.
 
 `create_all()` never ALTERs existing tables, so new columns are added by the
 hand-rolled idempotent startup migrations in `PORTAL_MIGRATIONS` (Postgres
@@ -113,9 +123,27 @@ that same article back instead of a duplicate.
 ## Admin API (consumed by the bot dashboard's "Portal administration" tab)
 
 All under `/api/admin/*`, all requiring `X-Service-Key`. Accounts (list,
-create, reset password, disable, delete, set orders, links), linked numbers,
-performance, and earnings — settings, per-user rate, entries (add / **edit** /
-delete), payouts, referrals (add / **edit** / delete).
+create, reset password, disable, delete, set orders, **set shipped orders**,
+links), linked numbers, performance, and earnings — settings, per-user rate,
+entries (add / **edit** / delete), payouts, referrals (add / **edit** / delete).
+
+Two endpoints that are not per-account:
+
+- `GET /api/admin/backup` — portal accounts (password **hashes** only, never
+  plaintext), earnings, entries, payouts, referrals and settings as JSON. The
+  bot merges its own users + tracking IDs and streams the ZIP the admin
+  downloads; if this endpoint is unreachable the bot returns 503 rather than a
+  half-empty archive.
+- `GET /api/admin/link-report?days=N&tz_offset=M` — per-day, per-sender link
+  counts across **all** senders, not just those with a portal account (which is
+  all `/performance` can see). `tz_offset` is minutes ahead of UTC, clamped to
+  ±840; it shifts the day boundary so a report fired at PKT midnight does not
+  mix the tail of one local day with the bulk of another. Feeds the bot's
+  nightly cron email.
+
+Note the marketing site's article lists are also admin-visible surface: Home and
+`/articles` render real `Link` rows, one card per product (latest wins), newest
+first, revoked excluded, split US vs rest by domain.
 
 Editing rules worth knowing: an earnings entry's **share** defaults to
 gross × rate but is stored as sent, so the admin can record what Amazon
