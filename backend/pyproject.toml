@@ -3,6 +3,7 @@ name = "beast-affiliates-backend"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=50.0.0",
     "fastapi==0.139.0",
     "httpx==0.28.1",
     "psycopg2-binary==2.9.12",

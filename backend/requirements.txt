@@ -12,10 +12,14 @@ certifi==2026.6.17
     # via
     #   httpcore
     #   httpx
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
 click==8.4.2
     # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
+cryptography==50.0.0
+    # via beast-affiliates-backend
 fastapi==0.139.0
     # via beast-affiliates-backend
 greenlet==3.5.3 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
@@ -34,6 +38,8 @@ idna==3.18
     #   httpx
 psycopg2-binary==2.9.12
     # via beast-affiliates-backend
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
 pydantic==2.13.4
     # via fastapi
 pydantic-core==2.46.4

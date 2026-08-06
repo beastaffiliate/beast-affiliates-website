@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import DateTime, Integer, String, Text, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
+from . import credentials
 from .config import ALLOW_SELF_SIGNUP, SERVICE_KEY
 from .database import Base, get_session
 from .models import Link, LinkEvent
@@ -64,6 +65,11 @@ class PortalAccount(Base):
     # Of those orders, how many have shipped — also admin-entered. Shown to the
     # user in their Earnings tab next to Orders.
     shipped_orders: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Encrypted copy of the password the ADMIN issued, so the Logins tab can
+    # show it again — password_hash above is still the only thing login checks.
+    # Cleared the moment the user sets their own password, so what the admin
+    # sees is never a stale guess. See credentials.py.
+    password_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class WaLinkCode(Base):
@@ -103,6 +109,7 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS commission_rate INTEGER",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS orders INTEGER DEFAULT 0",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS shipped_orders INTEGER DEFAULT 0",
+    "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_enc TEXT DEFAULT ''",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -559,6 +566,11 @@ async def change_password(
     if len(new) < 8:
         raise HTTPException(422, "New password must be at least 8 characters")
     account.password_hash = hash_password(new)
+    # The user has chosen their own password, so the admin's copy is both wrong
+    # and no longer theirs to hold. Dropping it is what keeps the Logins tab
+    # honest: it shows a real password or says the user changed it, never a
+    # stale one that will not work.
+    account.password_enc = ""
     session.add(account)
     session.commit()
     return {"ok": True}
@@ -767,6 +779,7 @@ def admin_reset_password(account_id: int, session: Session = Depends(get_session
         raise HTTPException(404, "Account not found")
     temp = "".join(secrets.choice(CODE_ALPHABET) for _ in range(10))
     account.password_hash = hash_password(temp)
+    account.password_enc = credentials.encrypt(temp)
     session.commit()
     return {"temp_password": temp, "username": account.username}
 
@@ -1444,11 +1457,48 @@ async def admin_create_account(
     account = PortalAccount(
         whatsapp_number=number, username=username,
         password_hash=hash_password(password),
+        # The admin issued this one, so keep a readable copy for the Logins
+        # tab. Self-signup deliberately does NOT do this: a password the user
+        # chose themselves is theirs, not ours to hand back out.
+        password_enc=credentials.encrypt(password),
     )
     session.add(account)
     session.commit()
     return {"id": account.id, "username": account.username,
             "whatsapp_number": account.whatsapp_number}
+
+
+@admin_router.get("/logins", dependencies=[Depends(require_service_key)])
+def admin_logins(session: Session = Depends(get_session)):
+    """Every existing portal account with the password the admin issued.
+
+    Deliberately its own endpoint rather than extra fields on /accounts:
+    passwords should cross the wire when the admin opens the Logins tab, not on
+    every dashboard load. `password` is empty when the user has since set their
+    own — the caller shows that as 'changed by user', never as a blank password.
+    """
+    accounts = session.execute(
+        select(PortalAccount).order_by(PortalAccount.username)
+    ).scalars().all()
+    return {
+        "storage_enabled": credentials.enabled(),
+        "accounts": [
+            {
+                "account_id": a.id,
+                "username": a.username,
+                "whatsapp_number": a.whatsapp_number,
+                "password": credentials.decrypt(a.password_enc),
+                # Distinguishes "the user set their own password" (nothing
+                # stored) from "stored but unreadable", which is what a rotated
+                # CREDENTIAL_KEY looks like. Both need a reset, but telling the
+                # admin the wrong reason sends them chasing the wrong problem.
+                "has_stored": bool(a.password_enc),
+                "disabled": bool(a.disabled),
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in accounts
+        ],
+    }
 
 
 @admin_router.get("/link-report", dependencies=[Depends(require_service_key)])
@@ -1515,9 +1565,15 @@ def admin_link_report(
 @admin_router.get("/backup", dependencies=[Depends(require_service_key)])
 def admin_backup(session: Session = Depends(get_session)):
     """Full dump of the website's portal + earnings data for the admin backup.
-    Password is a PBKDF2 hash (no plaintext is ever stored) — it enables a
-    restore, it is not a readable password. Bundled with bot-side users +
-    tracking IDs by the bot API before the zip is streamed to the admin."""
+
+    `password_hash` is PBKDF2 — it enables a restore, it is not a readable
+    password. `password_enc` (the readable copy behind the Logins tab) is
+    deliberately NOT exported: a backup zip gets emailed and left in Downloads
+    folders, and it is not worth turning every copy of it into a list of every
+    user's password. Keep new credential fields out of this list too.
+
+    Bundled with bot-side users + tracking IDs by the bot API before the zip is
+    streamed to the admin."""
     accounts = session.execute(
         select(PortalAccount).order_by(PortalAccount.username)
     ).scalars().all()
