@@ -6,6 +6,7 @@ const KIND_LABEL: Record<string, string> = {
   earning: "Earning",
   bonus: "Bonus",
   adjustment: "Adjustment",
+  return: "Return",
 };
 
 function fmtRs(n: number) {
@@ -39,41 +40,34 @@ export default function EarningsView() {
           gap: 20,
         }}
       >
-        <div className="card stat-green rise" style={{ padding: 24 }}>
-          <span className="eyebrow">Total earned</span>
-          <div className="stat-number" style={{ fontSize: 38 }}>{fmtRs(data.earned)}</div>
-        </div>
-        <div className="card stat-blue rise rise-1" style={{ padding: 24 }}>
-          <span className="eyebrow">Paid out</span>
-          <div className="stat-number" style={{ fontSize: 38 }}>{fmtRs(data.paid)}</div>
-        </div>
-        <div className="card stat-peach rise rise-2" style={{ padding: 24 }}>
-          <span className="eyebrow">Pending balance</span>
-          <div className="stat-number" style={{ fontSize: 38 }}>{fmtRs(data.balance)}</div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 20,
-        }}
-      >
+        {/* Four figures, all current. "Total earned" and "Paid out" used to sit
+            here too, and people read the lifetime total as money still owed —
+            what has already been paid now lives in Payout history below, where
+            it reads as history rather than as a balance. */}
         <div className="card stat-violet rise" style={{ padding: 24 }}>
-          <span className="eyebrow">Orders</span>
+          <span className="eyebrow">Total orders</span>
           <div className="stat-number" style={{ fontSize: 38 }}>{data.orders}</div>
         </div>
         <div className="card stat-cream rise rise-1" style={{ padding: 24 }}>
           <span className="eyebrow">Shipped orders</span>
           <div className="stat-number" style={{ fontSize: 38 }}>{data.shipped_orders}</div>
         </div>
+        <div className="card stat-peach rise rise-2" style={{ padding: 24 }}>
+          <span className="eyebrow">Return orders</span>
+          <div className="stat-number" style={{ fontSize: 38 }}>{data.return_orders}</div>
+        </div>
+        <div className="card stat-green rise rise-3" style={{ padding: 24 }}>
+          <span className="eyebrow">Current total earnings</span>
+          <div className="stat-number" style={{ fontSize: 38 }}>
+            {fmtRs(data.current_earnings)}
+          </div>
+        </div>
       </div>
 
       <div className="banner banner-ok" style={{ marginBottom: 0 }}>
         Payouts are processed from <strong>{fmtRs(data.min_payout)}</strong> —
-        once your pending balance reaches that amount, the team sends your money
-        to the bank account saved in your Profile.
+        once your current total earnings reach that amount, the team sends your
+        money to the bank account saved in your Profile.
       </div>
 
       {data.referrals.length > 0 && (
@@ -158,7 +152,8 @@ export default function EarningsView() {
               <table>
                 <thead>
                   <tr>
-                    <th>Amount</th>
+                    <th>Paid amount</th>
+                    <th>Paid orders</th>
                     <th>Date</th>
                   </tr>
                 </thead>
@@ -166,6 +161,7 @@ export default function EarningsView() {
                   {data.payouts.map((p, i) => (
                     <tr key={i}>
                       <td style={{ fontWeight: 700 }}>{fmtRs(p.amount)}</td>
+                      <td>{p.orders_paid || <span className="muted">—</span>}</td>
                       <td className="caption muted" style={{ whiteSpace: "nowrap" }}>
                         {new Date(p.paid_at).toLocaleDateString()}
                         {p.note ? <span className="muted"> — {p.note}</span> : null}

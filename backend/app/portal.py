@@ -110,6 +110,8 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS orders INTEGER DEFAULT 0",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS shipped_orders INTEGER DEFAULT 0",
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_enc TEXT DEFAULT ''",
+    "ALTER TABLE earnings_entries ADD COLUMN IF NOT EXISTS orders_count INTEGER DEFAULT 0",
+    "ALTER TABLE payout_records ADD COLUMN IF NOT EXISTS orders_paid INTEGER DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -805,10 +807,40 @@ async def admin_set_disabled(
 )
 def admin_delete_account(account_id: int, session: Session = Depends(get_session)):
     """Deletes the portal account (number becomes claimable again).
-    The user's links/articles are intentionally kept."""
+    The user's links/articles are intentionally kept.
+
+    Their money rows are NOT kept. Earnings, payouts and referrals are joined by
+    account_id with no foreign key, so leaving them behind orphans them forever
+    — and if an id is ever reissued they silently reattach to a different
+    person. Postgres does not reuse ids in normal running, but restoring from a
+    backup resets the sequences, which is precisely the moment someone would
+    inherit a stranger's balance.
+    """
     account = session.get(PortalAccount, account_id)
     if account is None:
         raise HTTPException(404, "Account not found")
+
+    for row in session.execute(
+        select(EarningsEntry).where(EarningsEntry.account_id == account_id)
+    ).scalars().all():
+        session.delete(row)
+    for row in session.execute(
+        select(PayoutRecord).where(PayoutRecord.account_id == account_id)
+    ).scalars().all():
+        session.delete(row)
+    for row in session.execute(
+        select(Referral).where(Referral.referrer_account_id == account_id)
+    ).scalars().all():
+        session.delete(row)
+    # Rewards OTHER people earned for referring this person stay — that money
+    # was genuinely earned. Snapshot the name so the row stays readable once
+    # the account it pointed at is gone.
+    for row in session.execute(
+        select(Referral).where(Referral.referred_account_id == account_id)
+    ).scalars().all():
+        row.referred_name = row.referred_name or f"@{account.username}"
+        row.referred_account_id = None
+
     session.delete(account)
     session.commit()
     return {"ok": True}
@@ -898,6 +930,8 @@ class PortalSetting(Base):
 
 SETTING_DEFAULTS = {"default_rate": "20", "min_payout": "1000"}
 
+ENTRY_KINDS = ("earning", "bonus", "adjustment", "return")
+
 
 def get_setting(session: Session, key: str) -> str:
     row = session.get(PortalSetting, key)
@@ -916,7 +950,11 @@ class EarningsEntry(Base):
     """One admin-entered earning line. kind:
     'earning'    — gross PKR x frozen rate -> net share
     'bonus'      — net entered directly (e.g. referral bonus)
-    'adjustment' — net entered directly, may be negative (returns etc.)"""
+    'adjustment' — net entered directly, may be negative
+    'return'     — a returned order: net is always negative, and orders_count
+                   records how many units came back. Kept distinct from
+                   'adjustment' so the user's Return Orders figure can be
+                   counted without guessing which adjustments were returns."""
 
     __tablename__ = "earnings_entries"
 
@@ -926,6 +964,10 @@ class EarningsEntry(Base):
     gross_amount: Mapped[int] = mapped_column(Integer, default=0)
     rate_applied: Mapped[int] = mapped_column(Integer, default=0)
     net_amount: Mapped[int] = mapped_column(Integer)
+    # Units returned, on 'return' entries only. Deliberately does NOT reduce
+    # Total Orders: the user sees returns as their own figure, so netting them
+    # out of orders as well would count the same return twice on screen.
+    orders_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     label: Mapped[str] = mapped_column(String(80))
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -937,6 +979,11 @@ class PayoutRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     account_id: Mapped[int] = mapped_column(Integer, index=True)
     amount: Mapped[int] = mapped_column(Integer)
+    # How many orders this payout settled. Orders shown to the user are the
+    # admin's running Amazon total MINUS the sum of these, so a payout draws
+    # the dashboard down without ever overwriting the figure the admin typed —
+    # and deleting a payout puts those orders straight back.
+    orders_paid: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     method: Mapped[str] = mapped_column(String(220), default="")  # snapshot
     note: Mapped[str] = mapped_column(String(200), default="")
     paid_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -972,6 +1019,15 @@ def _referral_total(session: Session, account_id: int) -> int:
 
 
 def _earnings_summary(session: Session, account: PortalAccount) -> dict:
+    """Every money and order figure, all DERIVED — nothing here is a stored
+    running total.
+
+    That is deliberate. `account.orders` / `shipped_orders` stay exactly as the
+    admin typed them from Amazon's own report; a payout records how many orders
+    it settled and the dashboard subtracts. Had a payout decremented the stored
+    number instead, the next time the admin entered the true Amazon total the
+    deduction would silently vanish and the two would drift apart forever.
+    """
     entries = session.execute(
         select(EarningsEntry).where(EarningsEntry.account_id == account.id)
     ).scalars().all()
@@ -979,10 +1035,28 @@ def _earnings_summary(session: Session, account: PortalAccount) -> dict:
         select(PayoutRecord).where(PayoutRecord.account_id == account.id)
     ).scalars().all()
     referrals = _referral_total(session, account.id)
+    # Returns are stored with a negative net_amount, so they come off here
+    # without needing a special case.
     earned = sum(e.net_amount for e in entries) + referrals
     paid = sum(p.amount for p in payouts)
-    return {"earned": earned, "paid": paid, "balance": earned - paid,
-            "entries_count": len(entries), "referral_total": referrals}
+    orders_paid = sum(p.orders_paid for p in payouts)
+    return {
+        "earned": earned,
+        "paid": paid,
+        # What the user sees as "Current Total Earnings".
+        "balance": earned - paid,
+        "entries_count": len(entries),
+        "referral_total": referrals,
+        "return_orders": sum(e.orders_count for e in entries if e.kind == "return"),
+        "returned_amount": sum(
+            -e.net_amount for e in entries if e.kind == "return"
+        ),
+        "orders_paid": orders_paid,
+        # Clamped so a lowered Amazon total can never show a negative count.
+        # admin_add_payout refuses to overdraw, so this should not trigger.
+        "current_orders": max(0, account.orders - orders_paid),
+        "current_shipped": max(0, account.shipped_orders - orders_paid),
+    }
 
 
 # ----------------------------------------------------- admin (service key)
@@ -1083,15 +1157,22 @@ def admin_earnings_detail(account_id: int, session: Session = Depends(get_sessio
             x for x in (account.bank, account.account_title, account.account_number) if x
         ),
         **_earnings_summary(session, account),
+        # The untouched Amazon totals the admin typed, alongside the derived
+        # current figures above — seeing both is how the admin can tell "30
+        # orders left" apart from "only 30 orders ever happened".
+        "orders_entered": account.orders,
+        "shipped_entered": account.shipped_orders,
         "entries": [
             {"id": e.id, "kind": e.kind, "gross_amount": e.gross_amount,
              "rate_applied": e.rate_applied, "net_amount": e.net_amount,
+             "orders_count": e.orders_count,
              "label": e.label, "note": e.note,
              "created_at": e.created_at.isoformat()}
             for e in entries
         ],
         "payouts": [
-            {"id": p.id, "amount": p.amount, "method": p.method,
+            {"id": p.id, "amount": p.amount, "orders_paid": p.orders_paid,
+             "method": p.method,
              "note": p.note, "paid_at": p.paid_at.isoformat()}
             for p in payouts
         ],
@@ -1182,10 +1263,11 @@ async def admin_add_entry(
     kind = str(body.get("kind", "earning"))
     label = str(body.get("label", "")).strip()[:80]
     note = str(body.get("note", "")).strip()[:200]
-    if kind not in ("earning", "bonus", "adjustment"):
+    if kind not in ENTRY_KINDS:
         raise HTTPException(422, "Invalid kind")
     if not label:
         raise HTTPException(422, "Label is required (e.g. 'July 2026')")
+    orders_count = 0
     if kind == "earning":
         gross = int(body.get("gross_amount", 0))
         if gross <= 0:
@@ -1199,13 +1281,21 @@ async def admin_add_entry(
             raise HTTPException(422, "Amount cannot be zero")
         if kind == "bonus" and net < 0:
             raise HTTPException(422, "Bonus must be positive")
+        if kind == "return":
+            # A return can only ever reduce earnings, so the sign is forced
+            # rather than validated: an admin typing 500 or -500 for a
+            # returned commission means the same thing and gets it.
+            net = -abs(net)
+            orders_count = max(0, int(body.get("orders_count", 0)))
     entry = EarningsEntry(
         account_id=account.id, kind=kind, gross_amount=gross,
         rate_applied=rate, net_amount=net, label=label, note=note,
+        orders_count=orders_count,
     )
     session.add(entry)
     session.commit()
-    return {"id": entry.id, "net_amount": net, "rate_applied": rate}
+    return {"id": entry.id, "net_amount": net, "rate_applied": rate,
+            "orders_count": entry.orders_count}
 
 
 @admin_router.put(
@@ -1227,7 +1317,7 @@ async def admin_update_entry(
     body = await _body(request)
 
     kind = str(body.get("kind", entry.kind))
-    if kind not in ("earning", "bonus", "adjustment"):
+    if kind not in ENTRY_KINDS:
         raise HTTPException(422, "Invalid kind")
 
     if "label" in body:
@@ -1258,18 +1348,29 @@ async def admin_update_entry(
             raise HTTPException(422, "Share cannot be negative")
         entry.gross_amount, entry.rate_applied, entry.net_amount = gross, rate, net
     else:
-        # Bonus/adjustment carry a direct amount; gross and rate don't apply.
+        # Bonus/adjustment/return carry a direct amount; gross and rate don't apply.
         net = int(body["net_amount"]) if "net_amount" in body else entry.net_amount
         if net == 0:
             raise HTTPException(422, "Amount cannot be zero")
         if kind == "bonus" and net < 0:
             raise HTTPException(422, "Bonus must be positive")
+        if kind == "return":
+            net = -abs(net)
         entry.gross_amount, entry.rate_applied, entry.net_amount = 0, 0, net
+
+    if kind == "return":
+        if "orders_count" in body:
+            entry.orders_count = max(0, int(body["orders_count"]))
+    else:
+        # Switching a return into something else must not leave its unit count
+        # behind, or Return Orders keeps counting a return that no longer exists.
+        entry.orders_count = 0
 
     entry.kind = kind
     session.commit()
     return {"id": entry.id, "kind": entry.kind, "gross_amount": entry.gross_amount,
             "rate_applied": entry.rate_applied, "net_amount": entry.net_amount,
+            "orders_count": entry.orders_count,
             "label": entry.label, "note": entry.note,
             "created_at": entry.created_at.isoformat()}
 
@@ -1302,16 +1403,27 @@ async def admin_add_payout(
     amount = int(body.get("amount", 0))
     if amount <= 0:
         raise HTTPException(422, "Amount (PKR) must be positive")
+
+    orders_paid = max(0, int(body.get("orders_paid", 0)))
+    remaining = _earnings_summary(session, account)["current_orders"]
+    if orders_paid > remaining:
+        # Refuse rather than clamp: silently paying fewer orders than the admin
+        # typed would leave their records and ours disagreeing.
+        raise HTTPException(
+            422,
+            f"Only {remaining} order(s) are outstanding — cannot pay {orders_paid}.",
+        )
+
     method = " | ".join(
         x for x in (account.bank, account.account_title, account.account_number) if x
     )
     payout = PayoutRecord(
-        account_id=account.id, amount=amount, method=method,
+        account_id=account.id, amount=amount, orders_paid=orders_paid, method=method,
         note=str(body.get("note", "")).strip()[:200],
     )
     session.add(payout)
     session.commit()
-    return {"id": payout.id}
+    return {"id": payout.id, "orders_paid": payout.orders_paid}
 
 
 @admin_router.delete(
@@ -1337,7 +1449,13 @@ def my_earnings(
     session: Session = Depends(get_session),
     account: PortalAccount = Depends(current_account),
 ):
-    """The user's view: net share only — no gross amounts, no rate."""
+    """The user's view: net share only — no gross amounts, no rate.
+
+    Deliberately does NOT send `earned` or `paid`. Showing lifetime earnings
+    next to a balance that had already been paid down was the confusion this
+    replaced — people read the big number as money still owed to them. Paid
+    amounts live in the payout history, where they read as history.
+    """
     summary = _earnings_summary(session, account)
     entries = session.execute(
         select(EarningsEntry)
@@ -1350,11 +1468,10 @@ def my_earnings(
         .order_by(PayoutRecord.paid_at.desc())
     ).scalars().all()
     return {
-        "earned": summary["earned"],
-        "paid": summary["paid"],
-        "balance": summary["balance"],
-        "orders": account.orders,
-        "shipped_orders": account.shipped_orders,
+        "current_earnings": summary["balance"],
+        "orders": summary["current_orders"],
+        "shipped_orders": summary["current_shipped"],
+        "return_orders": summary["return_orders"],
         "min_payout": int(get_setting(session, "min_payout")),
         "referrals": [
             {"referred_name": r["referred_name"], "amount": r["amount"],
@@ -1363,11 +1480,13 @@ def my_earnings(
         ],
         "entries": [
             {"kind": e.kind, "amount": e.net_amount, "label": e.label,
+             "orders_count": e.orders_count,
              "created_at": e.created_at.isoformat()}
             for e in entries
         ],
         "payouts": [
-            {"amount": p.amount, "paid_at": p.paid_at.isoformat(), "note": p.note}
+            {"amount": p.amount, "orders_paid": p.orders_paid,
+             "paid_at": p.paid_at.isoformat(), "note": p.note}
             for p in payouts
         ],
     }

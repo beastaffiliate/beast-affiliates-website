@@ -49,15 +49,27 @@ export interface WaStatus {
   bot_number: string;
 }
 
+/* All four figures are CURRENT, net of what has already been paid out.
+   Lifetime `earned` and `paid` are deliberately not sent any more. */
 export interface MyEarnings {
-  earned: number;
-  paid: number;
-  balance: number;
+  current_earnings: number;
   orders: number;
   shipped_orders: number;
+  return_orders: number;
   min_payout: number;
   referrals: { referred_name: string; amount: number; created_at: string }[];
-  entries: { kind: string; amount: number; label: string; created_at: string }[];
-  payouts: { amount: number; paid_at: string; note: string }[];
+  entries: {
+    kind: string;
+    amount: number;
+    label: string;
+    orders_count: number;
+    created_at: string;
+  }[];
+  payouts: {
+    amount: number;
+    orders_paid: number;
+    paid_at: string;
+    note: string;
+  }[];
 }
 
