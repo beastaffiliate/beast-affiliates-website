@@ -1,4 +1,4 @@
-import type { CheckStatus, LinkOut, Me, MyEarnings, Overview, WaStatus } from "./types";
+import type { LinkOut, Me, MyEarnings, Overview, WaStatus } from "./types";
 
 // Same-origin in both dev and prod. In dev, vite.config proxies these paths
 // to the local backend; in prod, vercel.json rewrites them to the backend
@@ -34,16 +34,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  check: (whatsapp_number: string) =>
-    request<{ status: CheckStatus; name?: string; username_hint?: string }>(
-      "/portal/check",
-      { method: "POST", body: JSON.stringify({ whatsapp_number }) },
-    ),
-  signup: (whatsapp_number: string, username: string, password: string) =>
-    request<{ token: string; username: string; name: string }>("/portal/signup", {
-      method: "POST",
-      body: JSON.stringify({ whatsapp_number, username, password }),
-    }),
+  // No check/signup here on purpose: accounts are admin-created, and the API
+  // returns 403 for both unless ALLOW_SELF_SIGNUP is set.
   login: (username: string, password: string) =>
     request<{ token: string; username: string }>("/portal/login", {
       method: "POST",

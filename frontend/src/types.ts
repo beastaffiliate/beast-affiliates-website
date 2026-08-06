@@ -42,8 +42,6 @@ export interface Me {
   account_number: string;
 }
 
-export type CheckStatus = "unregistered" | "unclaimed" | "claimed";
-
 export interface WaStatus {
   primary: string;
   linked: string[];

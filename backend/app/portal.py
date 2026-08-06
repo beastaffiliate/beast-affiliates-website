@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import DateTime, Integer, String, Text, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from .config import SERVICE_KEY
+from .config import ALLOW_SELF_SIGNUP, SERVICE_KEY
 from .database import Base, get_session
 from .models import Link, LinkEvent
 
@@ -266,8 +266,16 @@ def _user_links(session: Session, number: str) -> list[Link]:
 # ---------------------------------------------------------------------- auth
 
 
+SIGNUP_CLOSED = (
+    "Accounts are created by the admin. Contact the Beast Affiliates team to "
+    "get your dashboard login."
+)
+
+
 @router.post("/check")
 async def check_number(request: Request, session: Session = Depends(get_session)):
+    if not ALLOW_SELF_SIGNUP:
+        raise HTTPException(403, SIGNUP_CLOSED)
     number = _norm_number((await _body(request)).get("whatsapp_number", ""))
     if len(number) < 6:
         raise HTTPException(422, "Enter a valid WhatsApp number")
@@ -287,6 +295,8 @@ async def check_number(request: Request, session: Session = Depends(get_session)
 
 @router.post("/signup")
 async def signup(request: Request, session: Session = Depends(get_session)):
+    if not ALLOW_SELF_SIGNUP:
+        raise HTTPException(403, SIGNUP_CLOSED)
     body = await _body(request)
     number = _norm_number(body.get("whatsapp_number", ""))
     username = str(body.get("username", "")).strip().lower()
@@ -1408,7 +1418,9 @@ async def admin_create_account(
     request: Request, session: Session = Depends(get_session)
 ):
     """Admin creates a portal account on a user's behalf (credentials shared
-    with them separately). Self-signup still works for anyone not yet created."""
+    with them separately). Since self-signup closed this is the ONLY way an
+    account comes into existence — see ALLOW_SELF_SIGNUP. The caller (the bot's
+    /portal-admin gateway) is what checks the number is a real bot user."""
     body = await _body(request)
     number = _norm_number(str(body.get("whatsapp_number", "")))
     username = str(body.get("username", "")).strip().lower()

@@ -70,4 +70,15 @@ SERVICE_KEY = os.getenv("SERVICE_KEY", "")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+# Self-signup switch (client decision 2026-08-06): portal accounts are created
+# by the admin only, so the login page asks for nothing but a username and a
+# password. Closing this at the API matters — hiding the signup screen alone
+# would leave POST /portal/signup open to anyone who knows the endpoint.
+# Set ALLOW_SELF_SIGNUP=true to reopen it without a code change.
+ALLOW_SELF_SIGNUP = os.getenv("ALLOW_SELF_SIGNUP", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 DEFAULT_STORE_NAME = os.getenv("DEFAULT_STORE_NAME", "Beast Affiliates")
