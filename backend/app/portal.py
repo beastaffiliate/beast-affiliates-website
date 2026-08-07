@@ -1084,6 +1084,17 @@ def admin_earnings_overview(session: Session = Depends(get_session)):
             "min_payout": int(get_setting(session, "min_payout")),
         },
         "users": rows,
+        "totals": {
+            # What you would hand over if you paid everyone today. Overdrawn
+            # users count as zero rather than negative: you cannot use one
+            # person's overpayment to fund another's, so netting them off would
+            # understate the cash actually needed.
+            "to_be_paid": sum(max(0, r["balance"]) for r in rows),
+            "paid": sum(r["paid"] for r in rows),
+            # Surfaced so the admin can be told these exist instead of silently
+            # dropping them out of the total above.
+            "overdrawn_users": sum(1 for r in rows if r["balance"] < 0),
+        },
     }
 
 

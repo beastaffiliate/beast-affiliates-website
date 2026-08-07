@@ -207,5 +207,62 @@ check("and inherits no return orders", fresh.get("return_orders") == 0, fresh)
 
 call("DELETE", f"/api/admin/accounts/{acc2['id']}")
 
+# ------------------------------------------- money totals across all users
+# Shown at the top of Overall performance. Runs last, on an otherwise empty
+# database, so the sums are attributable to exactly the rows created here.
+_, empty = call("GET", "/api/admin/earnings")
+check("starting from no accounts", empty["totals"]["paid"] == 0, empty["totals"])
+
+
+def make(name, number, gross, payout=0, ret=0):
+    # Digits only: the API strips non-numeric characters, so a number built
+    # from the username collapses to the same value for everyone and the
+    # second account collides with the first.
+    _, a = call("POST", "/api/admin/accounts",
+                {"whatsapp_number": number,
+                 "username": name, "password": "pass12345678"})
+    assert "id" in a, f"account {name} not created: {a}"
+    i = a["id"]
+    call("PUT", f"/api/admin/earnings/{i}/rate", {"rate": 100})
+    call("POST", f"/api/admin/earnings/{i}/entries",
+         {"kind": "earning", "label": "x", "gross_amount": gross})
+    if payout:
+        call("POST", f"/api/admin/earnings/{i}/payouts", {"amount": payout})
+    if ret:
+        call("POST", f"/api/admin/earnings/{i}/entries",
+             {"kind": "return", "label": "r", "net_amount": ret, "orders_count": 1})
+    return i
+
+
+ids = [
+    # balance 6000, paid 4000
+    make("totalsa", "+923019990001", 10000, payout=4000),
+    # balance 0, paid 5000
+    make("totalsb", "+923019990002", 5000, payout=5000),
+    # balance -500, paid 1000 — the overdrawn one
+    make("totalsc", "+923019990003", 1000, payout=1000, ret=500),
+]
+
+_, d = call("GET", "/api/admin/earnings")
+t = d["totals"]
+check("to_be_paid sums what is actually owed", t["to_be_paid"] == 6000, t)
+check("an overdrawn user counts as zero, not as a negative",
+      t["to_be_paid"] == 6000, "netting -500 would have given 5500")
+check("paid sums every payout ever made", t["paid"] == 10000, t)
+check("overdrawn users are counted so they can be flagged",
+      t["overdrawn_users"] == 1, t)
+
+# paying someone moves the two figures in opposite directions
+call("POST", f"/api/admin/earnings/{ids[0]}/payouts", {"amount": 1000})
+_, d = call("GET", "/api/admin/earnings")
+check("a payout lowers to_be_paid", d["totals"]["to_be_paid"] == 5000, d["totals"])
+check("and raises paid", d["totals"]["paid"] == 11000, d["totals"])
+
+for i in ids:
+    call("DELETE", f"/api/admin/accounts/{i}")
+_, d = call("GET", "/api/admin/earnings")
+check("totals return to zero once the accounts are gone",
+      (d["totals"]["to_be_paid"], d["totals"]["paid"]) == (0, 0), d["totals"])
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
