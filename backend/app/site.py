@@ -23,6 +23,7 @@ BRANDS = {
         "accent_soft": "#f6ecf7",
         "tagline": "Product recommendations and buying guides to help you shop smarter.",
         "us": True,
+        "site_key": "",
     },
     "associate": {
         "name": "Beast Associate",
@@ -32,7 +33,51 @@ BRANDS = {
         "tagline": "Independent product research and buying guides for online shoppers.",
         "us": False,
     },
+    # US sites the admin can publish a user's articles to. No sign-in anywhere
+    # on these: the dashboard lives on beastaffiliates.com and these are read
+    # only as product-guide sites, so advertising a login would lead nowhere
+    # useful for their visitors.
+    "finds": {
+        "name": "Beast Finds",
+        "accent": "#0f6b5c",
+        "accent_dark": "#0a4f45",
+        "accent_soft": "#e8f4f1",
+        "site_key": "beastfinds",
+        "tagline": "Hand-picked product finds, researched and explained.",
+        "us": True,
+        "login": False,
+    },
+    "cart": {
+        "name": "Beast Cart",
+        "accent": "#a8541a",
+        "accent_dark": "#7d3e13",
+        "accent_soft": "#fbf0e7",
+        "site_key": "beastscart",
+        "tagline": "Honest buying guides to help you fill your cart with confidence.",
+        "us": True,
+        "login": False,
+    },
+    "deal": {
+        "name": "Beast Deals",
+        "accent": "#2f3d8f",
+        "accent_dark": "#232d6b",
+        "accent_soft": "#eceff9",
+        "site_key": "beastsdeal",
+        "tagline": "Deals worth knowing about, checked before we share them.",
+        "us": True,
+        "login": False,
+    },
 }
+
+# Which brand a request belongs to, by host. Replaces a substring check that
+# only ever had to tell two domains apart.
+HOST_BRANDS = [
+    ("beastassociate", "associate"),
+    ("beastfinds", "finds"),
+    ("beastscart", "cart"),
+    ("beastsdeal", "deal"),
+    ("beastaffiliates", "affiliates"),
+]
 
 CATEGORIES = {
     "DEMO01": "Home & Everyday",
@@ -48,8 +93,21 @@ NAV = [("/", "Home"), ("/articles", "Articles & Guides"),
 
 
 def brand_for(host: str, override: str = "") -> dict:
-    key = override or ("associate" if "associate" in (host or "").lower() else "affiliates")
+    key = override
+    if not key:
+        h = (host or "").lower()
+        key = next((k for frag, k in HOST_BRANDS if frag in h), "affiliates")
     return BRANDS.get(key, BRANDS["affiliates"])
+
+
+def shows_login(brand: dict) -> bool:
+    """Whether this site advertises the partner dashboard at all.
+
+    The three US publishing sites do not: their visitors are shoppers, and the
+    dashboard lives on beastaffiliates.com. Sending them to a login they cannot
+    use would be a dead end, so the partner sections are dropped rather than
+    left pointing somewhere unhelpful."""
+    return brand.get("login", True) is not False
 
 
 def login_url(host: str) -> str:
@@ -242,7 +300,7 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
 <header class="site"><div class="wrap"><div class="hrow">
   <a class="logo" href="/"><img src="/favicon.png" alt="">{esc(brand['name'])}</a>
   <nav class="main">{nav}</nav>
-  <a class="btn btn-primary" href="{login_url(host)}">Log in</a>
+  {f'<a class="btn btn-primary" href="{login_url(host)}">Log in</a>' if shows_login(brand) else ''}
 </div></div></header>
 <div class="strip">As an Amazon Associate we earn from qualifying purchases.
  <a href="/about#disclosure">Learn more →</a></div>
@@ -305,6 +363,12 @@ def _empty_state(brand: dict) -> str:
 def home(brand: dict, host: str, cards_data: list | None = None) -> str:
     cards_data = cards_data or []
     cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
+    partner_band = f"""<div class="ctaband">
+    <h2>Are you a partner?</h2>
+    <p>Registered partners can log in to manage their product links, track clicks
+       and orders, and view earnings.</p>
+    <a class="btn btn-lg" href="{login_url(host)}">Log in to your dashboard</a>
+  </div>""" if shows_login(brand) else ""
     body = f"""
 <section class="hero"><div class="wrap"><div class="hgrid">
   <div>
@@ -361,12 +425,7 @@ def home(brand: dict, host: str, cards_data: list | None = None) -> str:
       <p>Prices and availability are always confirmed on the retailer's site,
          where your purchase is completed.</p></div></div>
   </div>
-  <div class="ctaband">
-    <h2>Are you a partner?</h2>
-    <p>Registered partners can log in to manage their product links, track clicks
-       and orders, and view earnings.</p>
-    <a class="btn btn-lg" href="{login_url(host)}">Log in to your dashboard</a>
-  </div>
+  {partner_band}
 </div></section>"""
     return shell(brand, host, "Best Products & Deals", body, active="/")
 
@@ -403,6 +462,10 @@ def articles(brand: dict, host: str, cards_data: list | None = None,
 
 
 def about(brand: dict, host: str) -> str:
+    partner_note = f"""<h2>For our partners</h2>
+  <p>Registered partners use our dashboard to create product links, track views,
+    clicks and orders, and view their earnings and payouts.
+    <a href="{login_url(host)}">Log in here</a>.</p>""" if shows_login(brand) else ""
     body = f"""
 <section class="band" style="border-top:0"><div class="wrap prose">
   <h1 style="font-size:40px">About {esc(brand['name'])}</h1>
@@ -442,10 +505,7 @@ def about(brand: dict, host: str) -> str:
     delivery terms shown on our pages may become out of date; please verify the
     current details on the retailer's page before purchasing.</p>
 
-  <h2>For our partners</h2>
-  <p>Registered partners use our dashboard to create product links, track views,
-    clicks and orders, and view their earnings and payouts.
-    <a href="{login_url(host)}">Log in here</a>.</p>
+  {partner_note}
 
   <h2>Questions?</h2>
   <p>We're happy to hear from readers, partners and brands. Visit our
@@ -455,6 +515,10 @@ def about(brand: dict, host: str) -> str:
 
 
 def contact(brand: dict, host: str) -> str:
+    partner_row = f"""<div class="crow"><div class="ci">🤝</div><div>
+          <b>Partner support</b><br>
+          <a href="{login_url(host)}">Log in to your dashboard</a>
+          <div style="font-size:13.5px;color:var(--mute)">Account, links, earnings and payouts</div></div></div>""" if shows_login(brand) else ""
     body = f"""
 <section class="band" style="border-top:0"><div class="wrap">
   <h1 style="font-size:40px">Contact Us</h1>
@@ -479,10 +543,7 @@ def contact(brand: dict, host: str) -> str:
         <div class="crow"><div class="ci">✉️</div><div>
           <b>Email</b><br><a href="mailto:support@beastaffiliates.com">support@beastaffiliates.com</a>
           <div style="font-size:13.5px;color:var(--mute)">General questions, corrections and partnerships</div></div></div>
-        <div class="crow"><div class="ci">🤝</div><div>
-          <b>Partner support</b><br>
-          <a href="{login_url(host)}">Log in to your dashboard</a>
-          <div style="font-size:13.5px;color:var(--mute)">Account, links, earnings and payouts</div></div></div>
+        {partner_row}
         <div class="crow"><div class="ci">⏱️</div><div>
           <b>Response time</b><br>Within 2 business days
           <div style="font-size:13.5px;color:var(--mute)">Monday to Friday</div></div></div>

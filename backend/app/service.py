@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import amazon_url, articlegen, config, paapi, scraper
-from .config import MARKETPLACES, article_base
+from .config import MARKETPLACES, article_base, link_base
 from .models import Link, Product
 
 import json
@@ -105,8 +105,15 @@ def create_link(
     fallback_title: str = "",
     fallback_image: str = "",
     source_link_id: str = "",
+    us_site: str = "",
 ) -> tuple[Link, str]:
     """Create a hub link for a direct Amazon product URL.
+
+    `us_site` is the sender's chosen destination for US articles; it is ignored
+    for every other marketplace. The resolved domain is stored on the link so
+    the article keeps that address for good, even if the user is later moved to
+    a different site.
+
     Returns (link, absolute article URL). Raises LinkCreationError otherwise."""
     detected = amazon_url.detect(url)
     if detected is None:
@@ -125,7 +132,9 @@ def create_link(
             and origin.marketplace == marketplace
             and origin.asin == asin
         ):
-            return origin, f"{article_base(marketplace)}/p/{origin.id}/{origin.slug}"
+            # Forwarded back to its own creator: answer with the address it
+            # was published under, not wherever they publish today.
+            return origin, f"{link_base(origin)}/p/{origin.id}/{origin.slug}"
 
     # Product data is cached per (marketplace, ASIN) — scrape once, reuse for
     # everyone. The article/link ITSELF is always freshly created (owner
@@ -145,9 +154,10 @@ def create_link(
         store_name=store_name,
         tag=tag,
         tagged_url=amazon_url.canonical_tagged_url(url, marketplace, asin, tag),
+        site=article_base(marketplace, us_site),
     )
     session.add(link)
     session.commit()
 
-    article_url = f"{article_base(marketplace)}/p/{link.id}/{link.slug}"
+    article_url = f"{link.site}/p/{link.id}/{link.slug}"
     return link, article_url

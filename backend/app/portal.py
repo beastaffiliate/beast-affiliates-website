@@ -112,6 +112,8 @@ PORTAL_MIGRATIONS = [
     "ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_enc TEXT DEFAULT ''",
     "ALTER TABLE earnings_entries ADD COLUMN IF NOT EXISTS orders_count INTEGER DEFAULT 0",
     "ALTER TABLE payout_records ADD COLUMN IF NOT EXISTS orders_paid INTEGER DEFAULT 0",
+    # Not a portal table, but this is the only migration runner the website has.
+    "ALTER TABLE links ADD COLUMN IF NOT EXISTS site TEXT DEFAULT ''",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
 ]
 
@@ -644,9 +646,11 @@ def overview(
 
 
 def _article_url(link: Link) -> str:
-    from .config import article_base
+    from .config import link_base
 
-    return f"{article_base(link.marketplace)}/p/{link.id}/{link.slug}"
+    # The address it was published under, so the portal shows a user the same
+    # link they actually shared.
+    return f"{link_base(link)}/p/{link.id}/{link.slug}"
 
 
 @router.get("/links")

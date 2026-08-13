@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import amazon_url, service
@@ -25,6 +25,8 @@ from .config import (
     DEFAULT_STORE_NAME,
     SERVICE_KEY,
     article_base,
+    all_article_hosts,
+    link_base,
 )
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
@@ -198,6 +200,7 @@ async def api_create_link(
             fallback_title=str(body.get("fallback_title", "")).strip(),
             fallback_image=str(body.get("fallback_image", "")).strip(),
             source_link_id=str(body.get("source_link_id", "")).strip(),
+            us_site=str(body.get("us_site", "")).strip(),
         )
     except service.LinkCreationError as e:
         return Response(json.dumps({"error": str(e)}), 422,
@@ -259,13 +262,23 @@ def _site_ctx(request: Request, brand: str = ""):
 ARTICLES_PER_PAGE = 24
 
 
-def _article_cards(session: Session, us_domain: bool, limit: int, offset: int):
-    """Real published articles for a domain, one card per product (the most
+def _article_cards(session: Session, brand: dict, limit: int, offset: int):
+    """Real published articles for THIS domain, one card per product (the most
     recent article for it), newest first, excluding revoked links.
 
-    US-marketplace articles live on the affiliates domain; every other country
-    on the associate domain. Returns (cards, total_product_count)."""
-    mkt = (Link.marketplace == "US") if us_domain else (Link.marketplace != "US")
+    Filtered by the site each article was published to, not just by
+    marketplace: with several US domains, filtering on marketplace alone would
+    show every user's US articles on every US site. Returns (cards, total)."""
+    if not brand.get("us", True):
+        mkt = Link.marketplace != "US"
+    else:
+        base = article_base("US", brand.get("site_key", ""))
+        own = Link.site == base
+        # Links created before per-user sites existed carry no site and belong
+        # to the original US domain.
+        if base == ARTICLE_BASE_US:
+            own = or_(own, Link.site == "", Link.site.is_(None))
+        mkt = and_(Link.marketplace == "US", own)
     # Latest article timestamp per product, so a product shows once even when
     # many users have shared it — the newest share represents it and floats up.
     latest = (
@@ -306,7 +319,7 @@ def _article_cards(session: Session, us_domain: bool, limit: int, offset: int):
 def site_home(request: Request, brand: str = "",
               session: Session = Depends(get_session)):
     b, host = _site_ctx(request, brand)
-    cards, _ = _article_cards(session, b.get("us", True), limit=6, offset=0)
+    cards, _ = _article_cards(session, b, limit=6, offset=0)
     return HTMLResponse(site.home(b, host, cards))
 
 
@@ -316,7 +329,7 @@ def site_articles(request: Request, brand: str = "", page: int = 1,
     b, host = _site_ctx(request, brand)
     page = max(1, page)
     cards, total = _article_cards(
-        session, b.get("us", True), limit=ARTICLES_PER_PAGE,
+        session, b, limit=ARTICLES_PER_PAGE,
         offset=(page - 1) * ARTICLES_PER_PAGE,
     )
     total_pages = max(1, math.ceil(total / ARTICLES_PER_PAGE))
@@ -466,7 +479,7 @@ def article(link_id: str, slug: str, request: Request,
         # Canonical-domain enforcement: US articles live on the US domain,
         # everything else on the INTL domain. Only redirect between the two
         # configured hosts so localhost/preview deployments are unaffected.
-        canonical = article_base(link.marketplace)
+        canonical = link_base(link)
         canonical_host = urlsplit(canonical).netloc
         # Requests proxied by the portal-frontend project (beastaffiliates.com
         # rewrites /p/* here) carry ?xfh=us because Vercel's proxy replaces the
@@ -479,8 +492,9 @@ def article(link_id: str, slug: str, request: Request,
                 request.headers.get("x-forwarded-host")
                 or request.headers.get("host", "")
             ).split(",")[0].strip()
-        known_hosts = {urlsplit(ARTICLE_BASE_US).netloc,
-                       urlsplit(ARTICLE_BASE_INTL).netloc}
+        # Every domain we publish on, so an article opened on any of them is
+        # sent to the one it actually belongs to.
+        known_hosts = all_article_hosts()
         if request_host in known_hosts and request_host != canonical_host:
             return RedirectResponse(f"{canonical}/p/{link.id}/{link.slug}",
                                     status_code=308)
@@ -631,7 +645,7 @@ def store_page(slug: str, request: Request, session: Session = Depends(get_sessi
   <div class='pbody'>
     <div class='ptitle'>{esc(l.product.title[:110])}</div>
     <div class='pmeta'>{esc(l.marketplace)}{f" · ★ {esc(l.product.rating)}" if l.product.rating else ""}</div>
-    <a class='pbtn' href='{esc(article_base(l.marketplace))}/p/{l.id}/{l.slug}'>View product</a>
+    <a class='pbtn' href='{esc(link_base(l))}/p/{l.id}/{l.slug}'>View product</a>
   </div>
 </div>"""
         for l in unique_links

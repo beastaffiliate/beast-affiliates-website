@@ -53,6 +53,12 @@ class Link(Base):
     store_name: Mapped[str] = mapped_column(String(120), default="")
     tag: Mapped[str] = mapped_column(String(120), default="")
     tagged_url: Mapped[str] = mapped_column(Text)
+    # Where this article was published, recorded once at creation. Deliberately
+    # stored rather than recalculated: a link lives forever in somebody's
+    # WhatsApp history, so moving a user to a different site must never change
+    # where their existing links point. Empty = created before per-user sites
+    # existed, so the original US/INTL rule still applies to it.
+    site: Mapped[str] = mapped_column(Text, default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     views: Mapped[int] = mapped_column(Integer, default=0)
     clicks: Mapped[int] = mapped_column(Integer, default=0)

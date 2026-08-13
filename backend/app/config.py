@@ -58,9 +58,44 @@ def paapi_credentials(code: str) -> dict | None:
 ARTICLE_BASE_US = os.getenv("ARTICLE_BASE_US", "https://beastaffiliates.com")
 ARTICLE_BASE_INTL = os.getenv("ARTICLE_BASE_INTL", "https://beastassociate.com")
 
+# US articles can be published to any of these, chosen per user by the admin.
+# "" is the original destination, so a user nobody has changed keeps behaving
+# exactly as before. The keys are the values the bot stores against a user and
+# sends when minting — they MUST match ARTICLE_SITES in the bot's config.py.
+US_SITES: dict[str, str] = {
+    "": ARTICLE_BASE_US,
+    "beastfinds": os.getenv("ARTICLE_BASE_FINDS", "https://www.beastfinds.com"),
+    "beastscart": os.getenv("ARTICLE_BASE_CART", "https://www.beastscart.com"),
+    "beastsdeal": os.getenv("ARTICLE_BASE_DEAL", "https://www.beastsdeal.com"),
+}
 
-def article_base(marketplace_code: str) -> str:
-    return ARTICLE_BASE_US if marketplace_code == "US" else ARTICLE_BASE_INTL
+
+def article_base(marketplace_code: str, us_site: str = "") -> str:
+    """Where an article for this marketplace is published.
+
+    Non-US always goes to the international domain — the per-user choice only
+    ever moves US articles."""
+    if marketplace_code != "US":
+        return ARTICLE_BASE_INTL
+    return US_SITES.get(us_site or "", ARTICLE_BASE_US)
+
+
+def link_base(link) -> str:
+    """Where an existing article lives.
+
+    The address it was published under wins. Only links created before per-user
+    sites existed fall back to the marketplace rule, which is what they were
+    published under anyway."""
+    return getattr(link, "site", "") or article_base(link.marketplace)
+
+
+def all_article_hosts() -> set[str]:
+    """Every host we publish articles on, used to decide whether a request
+    arrived on the wrong domain and should be redirected."""
+    from urllib.parse import urlsplit
+
+    bases = list(US_SITES.values()) + [ARTICLE_BASE_INTL]
+    return {urlsplit(b).netloc for b in bases if b}
 
 
 # ------------------------------------------------------------------- security
