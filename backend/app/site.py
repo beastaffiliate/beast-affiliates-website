@@ -9,6 +9,9 @@ The affiliate portal itself is the React SPA at /dashboard.
 """
 
 import html as htmllib
+import os
+import re
+from urllib.parse import quote
 
 # ---------------------------------------------------------------- branding
 # `us` decides which marketplaces' articles a domain lists: the affiliates
@@ -91,6 +94,68 @@ CATEGORIES = {
 NAV = [("/", "Home"), ("/articles", "Articles & Guides"),
        ("/about", "About"), ("/contact", "Contact")]
 
+# Each new site orders its own nav, so they do not read as the same template
+# with the colours swapped.
+NAV_BY_BRAND = {
+    "finds": [("/", "Home"), ("/articles", "Guides"), ("/about", "How we work"),
+              ("/contact", "Contact")],
+    "cart": [("/", "Home"), ("/articles", "Shop guides"), ("/contact", "Contact"),
+             ("/about", "About us")],
+    "deal": [("/articles", "Today's picks"), ("/", "Home"), ("/about", "About"),
+             ("/contact", "Contact")],
+}
+
+# Where "Talk with our bot" goes. One number for every site.
+BOT_NUMBER = os.getenv("BOT_WA_NUMBER", "+923489712640")
+BOT_GREETING = os.getenv("BOT_WA_GREETING", "Hi, I'd like to use the Beast bot")
+
+
+def whatsapp_url() -> str:
+    """wa.me opens the chat on a phone and on WhatsApp Web alike, with the
+    first message already typed so the visitor only has to press send."""
+    digits = re.sub(r"\D", "", BOT_NUMBER)
+    return f"https://wa.me/{digits}?text={quote(BOT_GREETING)}"
+
+
+def nav_for(brand: dict) -> list[tuple[str, str]]:
+    key = next((k for k, v in BRANDS.items() if v is brand), "")
+    return NAV_BY_BRAND.get(key, NAV)
+
+
+# ------------------------------------------------------------------- logos
+# Drawn rather than shipped as image files: sharp at any size, tinted from the
+# brand's own accent, and nothing extra for the page to download. Each mark is
+# deliberately a different shape so the three sites are told apart at a glance.
+_LOGO_SHAPES = {
+    # a lens — "finds"
+    "finds": ('<circle cx="14" cy="14" r="8.5" fill="none" stroke="currentColor" '
+              'stroke-width="3.2"/><path d="M20.4 20.4L27 27" stroke="currentColor" '
+              'stroke-width="3.6" stroke-linecap="round"/>'),
+    # a basket — "cart"
+    "cart": ('<path d="M5 9h20l-2.4 12.4a2 2 0 0 1-2 1.6H9.4a2 2 0 0 1-2-1.6L5 9z" '
+             'fill="none" stroke="currentColor" stroke-width="3"/>'
+             '<path d="M11 9V6.5a4 4 0 0 1 8 0V9" fill="none" stroke="currentColor" '
+             'stroke-width="3" stroke-linecap="round"/>'),
+    # a price tag — "deals"
+    "deal": ('<path d="M16.5 4H26v9.5L13.4 26.1a2 2 0 0 1-2.8 0l-6.7-6.7a2 2 0 0 1 '
+             '0-2.8L16.5 4z" fill="none" stroke="currentColor" stroke-width="3" '
+             'stroke-linejoin="round"/><circle cx="21" cy="9" r="2.4" '
+             'fill="currentColor"/>'),
+}
+
+
+def logo_mark(brand: dict, size: int = 34) -> str:
+    """The site's logo. Brands with a drawn mark get their own shape; the two
+    original sites keep the Beast image they already had."""
+    key = next((k for k, v in BRANDS.items() if v is brand), "")
+    shape = _LOGO_SHAPES.get(key)
+    if not shape:
+        return f'<img src="/favicon.png" alt="" style="height:{size}px;width:{size}px">'
+    return (
+        f'<svg viewBox="0 0 32 32" width="{size}" height="{size}" role="img" '
+        f'aria-label="{esc(brand["name"])}" style="flex-shrink:0">{shape}</svg>'
+    )
+
 
 def brand_for(host: str, override: str = "") -> dict:
     key = override
@@ -117,6 +182,18 @@ def login_url(host: str) -> str:
     if "beastaffiliates" in h:
         return "/dashboard"
     return "https://www.beastaffiliates.com/dashboard"
+
+
+# WhatsApp's mark, drawn inline so the button needs no image and stays crisp.
+WA_GLYPH = (
+    '<svg viewBox="0 0 32 32" width="17" height="17" aria-hidden="true">'
+    '<path fill="currentColor" d="M16 3C8.8 3 3 8.8 3 16c0 2.3.6 4.5 1.7 6.4L3 29l6.8-1.8'
+    'A13 13 0 1 0 16 3zm0 23.6c-2 0-4-.5-5.7-1.6l-.4-.2-4 1 1.1-3.9-.3-.4A10.6 10.6 0 1 1 '
+    '16 26.6zm6-7.9c-.3-.2-1.9-1-2.2-1.1-.3-.1-.5-.2-.7.2s-.8 1-1 1.2-.4.2-.7 0a8.7 8.7 0 '
+    '0 1-4.3-3.7c-.3-.6.3-.5.9-1.7.1-.2 0-.4 0-.6l-1-2.3c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4'
+    '-.3.4-1.2 1.2-1.2 2.8s1.2 3.3 1.4 3.5c.2.2 2.4 3.7 5.9 5.1 2.2.9 3 1 4.1.8.7-.1 1.9-.8 '
+    '2.2-1.6.3-.8.3-1.4.2-1.6-.1-.2-.3-.2-.6-.4z"/></svg>'
+)
 
 
 def esc(v) -> str:
@@ -154,6 +231,12 @@ nav.main a.on{background:var(--accent);color:#fff}
 .btn-ghost{background:#fff;color:var(--accent)}
 .btn-ghost:hover{background:var(--accent-soft);text-decoration:none}
 .btn-lg{padding:14px 26px;font-size:16px}
+/* WhatsApp green, deliberately not the brand accent — the colour is what tells
+   people what the button does before they read it. */
+.btn-wa{background:#25d366;border-color:#25d366;color:#fff;display:inline-flex;
+ align-items:center;gap:8px}
+.btn-wa:hover{background:#1da851;border-color:#1da851;color:#fff;text-decoration:none}
+.wa-ico{display:inline-flex}
 
 /* disclosure strip */
 .strip{background:var(--accent-soft);border-bottom:1px solid var(--line);
@@ -283,11 +366,16 @@ footer.site a:hover{color:#fff}
 # ------------------------------------------------------------------ layout
 
 def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> str:
+    items = nav_for(brand)
     nav = "".join(
         f"<a href='{p}' class='{'on' if p == active else ''}'>{esc(l)}</a>"
-        for p, l in NAV
+        for p, l in items
     )
-    quick = "".join(f"<a href='{p}'>{esc(l)}</a>" for p, l in NAV)
+    quick = "".join(f"<a href='{p}'>{esc(l)}</a>" for p, l in items)
+    # Green on every site, brand colours notwithstanding: green IS the signal
+    # that this opens WhatsApp, and recolouring it per brand would lose that.
+    wa = (f'<a class="btn btn-wa" href="{whatsapp_url()}" target="_blank" '
+          f'rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>')
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} | {esc(brand['name'])}</title>
@@ -298,8 +386,9 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>{CSS % brand}</style></head><body>
 <header class="site"><div class="wrap"><div class="hrow">
-  <a class="logo" href="/"><img src="/favicon.png" alt="">{esc(brand['name'])}</a>
+  <a class="logo" href="/">{logo_mark(brand)}{esc(brand['name'])}</a>
   <nav class="main">{nav}</nav>
+  {wa}
   {f'<a class="btn btn-primary" href="{login_url(host)}">Log in</a>' if shows_login(brand) else ''}
 </div></div></header>
 <div class="strip">As an Amazon Associate we earn from qualifying purchases.
@@ -308,7 +397,7 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
 <footer class="site"><div class="wrap">
   <div class="fgrid">
     <div>
-      <div class="flogo"><img src="/favicon.png" alt="">{esc(brand['name'])}</div>
+      <div class="flogo">{logo_mark(brand, 30)}{esc(brand['name'])}</div>
       <p>{esc(brand['tagline'])}</p>
       <p style="margin-top:14px;font-size:13px">
         <b style="color:#fff">Affiliate Disclosure:</b> As an Amazon Associate we earn
@@ -316,7 +405,8 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
         to you. Product availability and pricing are set by the retailer and may change.
       </p>
     </div>
-    <div><h4>Quick Links</h4>{quick}</div>
+    <div><h4>Quick Links</h4>{quick}
+      <a href="{whatsapp_url()}" target="_blank" rel="noopener">Talk with our bot</a></div>
     <div><h4>Legal</h4>
       <a href="/privacy">Privacy Policy</a>
       <a href="/terms">Terms &amp; Conditions</a>
@@ -361,6 +451,13 @@ def _empty_state(brand: dict) -> str:
 
 
 def home(brand: dict, host: str, cards_data: list | None = None) -> str:
+    """The landing page. The three newer sites each get their own composition
+    rather than the same template in a different colour — different hero shape,
+    different section order, different way of presenting the guides."""
+    key = next((k for k, v in BRANDS.items() if v is brand), "")
+    builder = {"finds": _home_finds, "cart": _home_cart, "deal": _home_deal}.get(key)
+    if builder:
+        return builder(brand, host, cards_data or [])
     cards_data = cards_data or []
     cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
     partner_band = f"""<div class="ctaband">
@@ -428,6 +525,152 @@ def home(brand: dict, host: str, cards_data: list | None = None) -> str:
   {partner_band}
 </div></section>"""
     return shell(brand, host, "Best Products & Deals", body, active="/")
+
+
+# ------------------------------------------------- the three newer layouts
+# Each is a different composition on purpose. They share shell(), so header,
+# footer, palette and logo stay consistent within a site while the page itself
+# reads as its own thing.
+
+
+def _wa_band(label: str, line: str) -> str:
+    """The bot call-to-action, repeated mid-page where a visitor has just read
+    something and is deciding what to do next."""
+    return f"""<section class="band"><div class="wrap">
+  <div class="ctaband">
+    <h2>{esc(label)}</h2>
+    <p>{esc(line)}</p>
+    <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+  </div>
+</div></section>"""
+
+
+def _home_finds(brand: dict, host: str, cards_data: list) -> str:
+    """Centred and editorial: one statement, then straight into the guides."""
+    cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
+    body = f"""
+<section class="hero"><div class="wrap" style="text-align:center;max-width:820px">
+  <h1 style="font-size:46px">Things worth finding, checked before we share them</h1>
+  <p class="lead" style="margin:20px auto 26px">Every guide starts from the
+    retailer own listing: what the product is, what it does well, and what to
+    look at twice before buying.</p>
+  <div class="cta-row" style="justify-content:center">
+    <a class="btn btn-primary btn-lg" href="/articles">Browse the guides</a>
+    <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+  </div>
+</div></section>
+
+<section class="band soft"><div class="wrap">
+  <div class="shead"><div><h2>Latest finds</h2>
+    <p class="sub">Newest first, one guide per product.</p></div>
+    <a class="btn btn-ghost" href="/articles">View all</a></div>
+  <div class="acards">{cards}</div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="shead"><div><h2>How a find gets written up</h2></div></div>
+  <div class="acards" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+    <div class="fcard"><div class="fico">1</div><div><h3>Read the listing</h3>
+      <p>Specifications and category details come from the retailer own page.</p></div></div>
+    <div class="fcard"><div class="fico">2</div><div><h3>Write it plainly</h3>
+      <p>What it does well, what to consider, and who it actually suits.</p></div></div>
+    <div class="fcard"><div class="fico">3</div><div><h3>You buy at the shop</h3>
+      <p>Price and availability are confirmed where the purchase happens.</p></div></div>
+  </div>
+  <div class="disc-box" style="max-width:none;margin-top:26px"><b>Affiliate
+    Disclosure:</b> As an Amazon Associate we earn from qualifying purchases, at
+    no extra cost to you.</div>
+</div></section>
+{_wa_band("Looking for something specific?",
+          "Send the product to our WhatsApp bot and get a link straight back.")}"""
+    return shell(brand, host, "Product finds and buying guides", body, active="/")
+
+
+def _home_cart(brand: dict, host: str, cards_data: list) -> str:
+    """Shop-shaped: the guides come first, the explanation afterwards."""
+    cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
+    body = f"""
+<section class="band soft" style="border-top:0;padding-top:48px"><div class="wrap">
+  <div style="font-weight:700;font-size:13px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent)">Buying guides</div>
+  <h1 style="font-size:44px;margin-top:8px;max-width:18ch">Fill your cart with
+    fewer regrets</h1>
+  <p class="lead">Comparisons and plain-language guides, so you know what you are
+    choosing between before spending anything.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary btn-lg" href="/articles">Start browsing</a>
+    <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <div class="shead"><div><h2>In the aisles right now</h2>
+    <p class="sub">Recent write-ups across every category we cover.</p></div>
+    <a class="btn btn-ghost" href="/articles">See everything</a></div>
+  <div class="acards">{cards}</div>
+</div></section>
+
+{_wa_band("Cannot find it here?",
+          "Message the bot with a product link and it sends one back, ready to share.")}
+
+<section class="band soft"><div class="wrap"><div class="hgrid">
+  <div>
+    <h2>Why every guide reads the same way</h2>
+    <p class="sub">A consistent shape means two products can be compared without
+      rereading how each page is organised. No sponsored placements, and no
+      rankings sold to a brand.</p>
+    <div class="disc-box"><b>Affiliate Disclosure:</b> As an Amazon Associate we
+      earn from qualifying purchases, at no extra cost to you.</div>
+  </div>
+  <div class="fcards">
+    <div class="fcard"><div class="fico">📋</div><div><h3>Same sections, every guide</h3>
+      <p>Details, what we like, what to consider, who it suits.</p></div></div>
+    <div class="fcard"><div class="fico">🏬</div><div><h3>The shop sets the price</h3>
+      <p>We never quote a price that could be stale by the time you read it.</p></div></div>
+  </div>
+</div></div></section>"""
+    return shell(brand, host, "Buying guides and product comparisons", body, active="/")
+
+
+def _home_deal(brand: dict, host: str, cards_data: list) -> str:
+    """Bold and strip-led: a claim bar, then the picks."""
+    cards = "".join(_card(a) for a in cards_data) or _empty_state(brand)
+    body = f"""
+<section class="hero" style="padding:54px 0 34px"><div class="wrap">
+  <h1 style="font-size:50px;max-width:15ch">Deals worth a second look</h1>
+  <p class="lead">Write-ups of products people are actually buying, with the detail
+    the listing buries. Check it here, buy it at the shop.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary btn-lg" href="/articles">Today picks</a>
+    <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+  </div>
+</div></section>
+
+<section style="background:var(--accent);color:#fff;padding:18px 0">
+  <div class="wrap" style="display:flex;gap:26px;flex-wrap:wrap;
+    justify-content:center;font-weight:600;font-size:15px">
+    <span>No sponsored rankings</span><span>&middot;</span>
+    <span>Prices confirmed at the shop</span><span>&middot;</span>
+    <span>Written from the real listing</span>
+  </div>
+</section>
+
+<section class="band"><div class="wrap">
+  <div class="shead"><div><h2>Picked recently</h2>
+    <p class="sub">The newest write-ups, one per product.</p></div>
+    <a class="btn btn-ghost" href="/articles">All picks</a></div>
+  <div class="acards">{cards}</div>
+  <div class="disc-box" style="max-width:none;margin-top:26px"><b>Affiliate
+    Disclosure:</b> As an Amazon Associate we earn from qualifying purchases, at
+    no extra cost to you. Availability and pricing are set by the retailer.</div>
+</div></section>
+{_wa_band("Want a link for something?",
+          "Send it to the bot on WhatsApp and get one back in seconds.")}"""
+    return shell(brand, host, "Deals and product picks", body, active="/")
 
 
 def _pager(page: int, total_pages: int) -> str:
