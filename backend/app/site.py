@@ -105,16 +105,13 @@ NAV_BY_BRAND = {
              ("/contact", "Contact")],
 }
 
-# Where "Talk with our bot" goes. One number for every site.
-BOT_NUMBER = os.getenv("BOT_WA_NUMBER", "+923489712640")
-BOT_GREETING = os.getenv("BOT_WA_GREETING", "Hi, I'd like to use the Beast bot")
+# The number and greeting live in config so the marketing pages and the article
+# pages cannot drift apart, and so neither one can be repointed at the bot's own
+# number by editing the wrong setting.
+from .config import whatsapp_url  # noqa: E402
 
-
-def whatsapp_url() -> str:
-    """wa.me opens the chat on a phone and on WhatsApp Web alike, with the
-    first message already typed so the visitor only has to press send."""
-    digits = re.sub(r"\D", "", BOT_NUMBER)
-    return f"https://wa.me/{digits}?text={quote(BOT_GREETING)}"
+# What the green tab says. Not "bot": this number is answered by a person.
+WA_LABEL = "For Premium Products"
 
 
 def nav_for(brand: dict) -> list[tuple[str, str]]:
@@ -375,7 +372,7 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
     # Green on every site, brand colours notwithstanding: green IS the signal
     # that this opens WhatsApp, and recolouring it per brand would lose that.
     wa = (f'<a class="btn btn-wa" href="{whatsapp_url()}" target="_blank" '
-          f'rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>')
+          f'rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>{WA_LABEL}</a>')
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} | {esc(brand['name'])}</title>
@@ -406,7 +403,7 @@ def shell(brand: dict, host: str, title: str, body: str, active: str = "") -> st
       </p>
     </div>
     <div><h4>Quick Links</h4>{quick}
-      <a href="{whatsapp_url()}" target="_blank" rel="noopener">Talk with our bot</a></div>
+      <a href="{whatsapp_url()}" target="_blank" rel="noopener">{WA_LABEL}</a></div>
     <div><h4>Legal</h4>
       <a href="/privacy">Privacy Policy</a>
       <a href="/terms">Terms &amp; Conditions</a>
@@ -541,7 +538,7 @@ def _wa_band(label: str, line: str) -> str:
     <h2>{esc(label)}</h2>
     <p>{esc(line)}</p>
     <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
-       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>{WA_LABEL}</a>
   </div>
 </div></section>"""
 
@@ -558,7 +555,7 @@ def _home_finds(brand: dict, host: str, cards_data: list) -> str:
   <div class="cta-row" style="justify-content:center">
     <a class="btn btn-primary btn-lg" href="/articles">Browse the guides</a>
     <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
-       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>{WA_LABEL}</a>
   </div>
 </div></section>
 
@@ -602,7 +599,7 @@ def _home_cart(brand: dict, host: str, cards_data: list) -> str:
   <div class="cta-row">
     <a class="btn btn-primary btn-lg" href="/articles">Start browsing</a>
     <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
-       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>{WA_LABEL}</a>
   </div>
 </div></section>
 
@@ -646,7 +643,7 @@ def _home_deal(brand: dict, host: str, cards_data: list) -> str:
   <div class="cta-row">
     <a class="btn btn-primary btn-lg" href="/articles">Today picks</a>
     <a class="btn btn-wa btn-lg" href="{whatsapp_url()}" target="_blank"
-       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>Talk with our bot</a>
+       rel="noopener"><span class="wa-ico">{WA_GLYPH}</span>{WA_LABEL}</a>
   </div>
 </div></section>
 

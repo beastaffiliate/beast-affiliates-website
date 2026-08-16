@@ -27,6 +27,7 @@ from .config import (
     article_base,
     all_article_hosts,
     link_base,
+    whatsapp_url,
 )
 from .database import engine, get_session, init_db
 from .models import Link, LinkEvent
@@ -74,6 +75,13 @@ header{background:#101828;color:#fff;padding:14px 32px;display:flex;justify-cont
 header .brand{display:flex;gap:10px;align-items:center;font-weight:700;font-size:18px}
 header .logo{width:30px;height:30px;border-radius:8px;background:#3b82f6;display:grid;place-items:center;font-size:15px}
 header a{color:#cbd5e1;font-size:14px}
+/* WhatsApp green regardless of the site's palette: the colour is what tells
+   someone what the strip does before they read it. */
+.wabar{display:flex;align-items:center;justify-content:center;gap:8px;
+ background:#25d366;color:#fff;font-weight:700;font-size:14.5px;padding:11px 16px;
+ text-decoration:none}
+.wabar:hover{background:#1da851;color:#fff;text-decoration:none}
+.wabar svg{flex-shrink:0}
 .wrap{max-width:1200px;margin:0 auto;padding:28px 32px}
 h1{font-size:30px;margin:6px 0 22px;font-weight:650}
 .grid{display:grid;grid-template-columns:1fr 330px;gap:28px;align-items:start}
@@ -158,6 +166,33 @@ td img{width:38px;height:38px;object-fit:contain}
   .fbtn{padding:7px 14px;font-size:13px}
 }
 """
+
+
+# WhatsApp's mark, drawn inline: an article page must not depend on an image
+# host, and this stays crisp at any size.
+WA_GLYPH = (
+    "<svg viewBox='0 0 32 32' width='16' height='16' aria-hidden='true'>"
+    "<path fill='currentColor' d='M16 3C8.8 3 3 8.8 3 16c0 2.3.6 4.5 1.7 6.4L3 29l6.8-1.8"
+    "A13 13 0 1 0 16 3zm0 23.6c-2 0-4-.5-5.7-1.6l-.4-.2-4 1 1.1-3.9-.3-.4A10.6 10.6 0 1 1 "
+    "16 26.6zm6-7.9c-.3-.2-1.9-1-2.2-1.1-.3-.1-.5-.2-.7.2s-.8 1-1 1.2-.4.2-.7 0a8.7 8.7 0 "
+    "0 1-4.3-3.7c-.3-.6.3-.5.9-1.7.1-.2 0-.4 0-.6l-1-2.3c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1"
+    "-.9.4-.3.4-1.2 1.2-1.2 2.8s1.2 3.3 1.4 3.5c.2.2 2.4 3.7 5.9 5.1 2.2.9 3 1 4.1.8.7-.1 "
+    "1.9-.8 2.2-1.6.3-.8.3-1.4.2-1.6-.1-.2-.3-.2-.6-.4z'/></svg>"
+)
+
+
+def wa_bar(product_title: str = "") -> str:
+    """The support strip that sits under the header on every article page.
+
+    The greeting names the product when we know it, so whoever answers can see
+    which page the message came from without having to ask.
+    """
+    text = (f"Hi, I have a question about: {product_title[:70]}"
+            if product_title else "")
+    return (
+        f"<a class='wabar' href='{esc(whatsapp_url(text))}' target='_blank' "
+        f"rel='noopener'>{WA_GLYPH}<span>Support on WhatsApp</span></a>"
+    )
 
 
 def page(title: str, body: str, head_extra: str = "") -> str:
@@ -394,6 +429,7 @@ def _render_demo_article(art: dict) -> HTMLResponse:
     body = f"""
 <header><div class='brand'><div class='logo'>{esc(store[:1].upper())}</div>{esc(store)}</div>
 <a href='#disclosure'>Affiliate Disclosure</a></header>
+{wa_bar(art['title'])}
 <div class='wrap'>
   <h1>{esc(art['title'][:90])}</h1>
   <a class='cta cta-mobile' href='/go/{art['id']}' rel='nofollow sponsored'>View on Amazon</a>
@@ -540,6 +576,7 @@ def article(link_id: str, slug: str, request: Request,
     body = f"""
 <header><div class='brand'><div class='logo'>{esc(store[:1].upper())}</div>{esc(store)}</div>
 <a href='#disclosure'>Affiliate Disclosure</a></header>
+{wa_bar(product.title)}
 <div class='wrap'>
   <h1>{esc(product.title[:90])}</h1>
   <a class='cta cta-mobile' href='/go/{link.id}' rel='nofollow sponsored'>View on Amazon</a>
@@ -653,6 +690,7 @@ def store_page(slug: str, request: Request, session: Session = Depends(get_sessi
     body = f"""
 <header><div class='brand'><div class='logo'>{esc(store_title[:1].upper())}</div>{esc(store_title)}</div>
 <a href='#'>Affiliate Disclosure</a></header>
+{wa_bar()}
 <div class='wrap'>
   <div class='store-head'>
     <span class='slug'>/u/{esc(account.store_slug)}</span>

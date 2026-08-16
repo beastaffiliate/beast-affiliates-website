@@ -5,6 +5,7 @@ Never hardcode credentials here.
 """
 
 import os
+import re
 from pathlib import Path
 
 try:
@@ -96,6 +97,30 @@ def all_article_hosts() -> set[str]:
 
     bases = list(US_SITES.values()) + [ARTICLE_BASE_INTL]
     return {urlsplit(b).netloc for b in bases if b}
+
+
+# ------------------------------------------------------------------ whatsapp
+# The number the public sites and article pages invite people to message.
+# Deliberately NOT the same setting as portal.py's BOT_WA_NUMBER: that one is
+# the bot itself, handed to users during WhatsApp linking, and pointing the two
+# at one number by accident would send shoppers into the bot's chat.
+WHATSAPP_NUMBER = os.getenv("SUPPORT_WA_NUMBER", "+923460976174")
+WHATSAPP_GREETING = os.getenv(
+    "SUPPORT_WA_GREETING", "Hi, I'm interested in premium products"
+)
+
+
+def whatsapp_url(text: str = "") -> str:
+    """A wa.me link with the first message already typed.
+
+    wa.me works on a phone and on WhatsApp Web alike; the number must be digits
+    only, so a written "+92 346 ..." is normalised here rather than relying on
+    whoever sets the environment variable to strip it.
+    """
+    from urllib.parse import quote
+
+    digits = re.sub(r"\D", "", WHATSAPP_NUMBER)
+    return f"https://wa.me/{digits}?text={quote(text or WHATSAPP_GREETING)}"
 
 
 # ------------------------------------------------------------------- security

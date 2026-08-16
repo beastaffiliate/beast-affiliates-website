@@ -39,6 +39,10 @@ def render(key, path="/"):
 
 # ------------------------------------------------------------- WhatsApp tab
 wa = site.whatsapp_url()
+check("the tab says what the client asked for",
+      site.WA_LABEL == "For Premium Products", site.WA_LABEL)
+check("it no longer calls the number a bot",
+      "bot" not in site.WA_LABEL.lower(), site.WA_LABEL)
 check("bot link is a wa.me link", wa.startswith("https://wa.me/"), wa)
 check("number carries no spaces or plus", re.fullmatch(r"https://wa\.me/\d+\?text=.+", wa), wa)
 check("the greeting is pre-filled", "text=" in wa and len(wa.split("text=")[1]) > 5, wa)
@@ -46,7 +50,7 @@ check("the greeting is pre-filled", "text=" in wa and len(wa.split("text=")[1]) 
 for key in ALL:
     for path in PAGES:
         html = render(key, path)
-        if "btn-wa" not in html or wa not in html:
+        if "btn-wa" not in html or wa not in html or site.WA_LABEL not in html:
             check(f"{key} {path}: bot tab present", False, "missing on this page")
             break
     else:
