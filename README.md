@@ -3,12 +3,12 @@
 Companion website for the WhatsApp affiliate bot. Registered users get a
 dashboard (portal) and per-user "hub" article pages whose **View on Amazon**
 button routes through a click-counting redirect to the user's tagged affiliate
-link. Last updated 2026-08-02 — live on both domains.
+link. Last updated 2026-08-19 — live on FIVE domains.
 
-As of 2026-08-02 **48 of the bot's 60 users are on `hub` replies** and 12 on
-`direct`, so this repo is on the critical path for most replies now. The bot's
+As of 2026-08-19 **71 of the bot's 75 users are on `hub` replies** and only 4 on
+`direct`, so this repo is on the critical path for nearly every reply. The bot's
 fail-safe still holds (a mint failure leaves the tagged Amazon link), but an
-outage here degrades the majority of users rather than a handful.
+outage here now degrades almost everyone rather than a handful.
 
 - `backend/` — FastAPI (managed with **uv**), deployed on Vercel. Serves:
   - the **public marketing site** (`app/site.py`, server-rendered): Home,
@@ -31,7 +31,7 @@ outage here degrades the majority of users rather than a handful.
 
 `products` (per marketplace+ASIN article cache), `links`, `link_events` (raw
 view/click rows), `portal_accounts` (login, avatar, store slug, payout bank
-details, commission_rate, orders, **shipped_orders**, disabled),
+details, commission_rate, orders, **shipped_orders**, **password_enc**, disabled),
 `wa_link_codes` (3-minute single-use WhatsApp linking codes), `portal_settings`
 (default_rate, min_payout), `earnings_entries`, `payout_records`, `referrals`.
 
@@ -49,12 +49,27 @@ swallowed).
 
 | Marketplace | Article domain |
 |---|---|
-| US (amazon.com) | `beastaffiliates.com` (also hosts the marketing site + portal) |
+| US (amazon.com) | one of **four** — chosen per user by the admin (below) |
 | all others | `beastassociate.com` (`ARTICLE_BASE_INTL`) |
 
-Both domains attach to the SAME Vercel backend project; the minted article URL
-picks the domain by marketplace (`app/config.py: article_base`), and an article
-opened on the wrong domain 308s to its own.
+US articles can be published to `beastaffiliates.com` (the default, and the only
+one hosting the portal), `beastfinds.com`, `beastscart.com` or `beastsdeal.com`.
+The choice lives on the BOT user and arrives in the mint payload as `us_site`;
+`config.US_SITES` maps it to a domain.
+
+**`links.site` records the domain at creation and is never recalculated.** An
+article link lives forever in somebody's WhatsApp history, so moving a user to a
+different site must change only their next article. Links created before this
+existed carry no site and fall back to the original US/INTL rule.
+
+Each of the three newer sites has its own logo, nav and landing-page layout, and
+advertises **no sign-in** — the dashboard is on beastaffiliates.com only.
+
+All five domains attach to the SAME Vercel backend project. The minted article
+URL picks its domain at creation (`app/config.py: article_base`), stores it, and
+an article opened on any of the other four 308s to its own. The article listing
+filters by that stored site, so each domain shows only its own work — filtering
+on marketplace alone would put every US article on all four US sites.
 
 **Two routing gotchas that cost real debugging time:**
 
@@ -129,8 +144,12 @@ entries (add / **edit** / delete), payouts, referrals (add / **edit** / delete).
 
 Two endpoints that are not per-account:
 
-- `GET /api/admin/backup` — portal accounts (password **hashes** only, never
-  plaintext), earnings, entries, payouts, referrals and settings as JSON. The
+- `GET /api/admin/backup` — portal accounts, earnings, entries, payouts,
+  referrals and settings as JSON. Exports `password_hash` (PBKDF2, enables a
+  restore) but deliberately NOT `password_enc`, the readable copy behind the
+  admin's Logins tab — a backup zip gets emailed and left in Downloads folders,
+  and it is not worth turning every copy of it into a list of everyone's
+  password. Keep new credential fields out of that export too. The
   bot merges its own users + tracking IDs and streams the ZIP the admin
   downloads; if this endpoint is unreachable the bot returns 503 rather than a
   half-empty archive.
