@@ -35,6 +35,13 @@ details, commission_rate, orders, **shipped_orders**, **password_enc**, disabled
 `wa_link_codes` (3-minute single-use WhatsApp linking codes), `portal_settings`
 (default_rate, min_payout), `earnings_entries`, `payout_records`, `referrals`.
 
+> **Planned (client PDF, not built yet):** automatic report → earnings import,
+> a user-facing Refer & Earn form + status pipeline, and admin-managed multiple
+> WhatsApp numbers per user. These build on the tables above (`earnings_entries`,
+> `referrals`, and the bot's `linked_numbers`). Design, the report format, and the
+> **shared-tracking-ID constraint** that blocks per-user report attribution for
+> non-US marketplaces are all written up in the bot repo's `PORTAL-PLAN.md`.
+
 `MAX_WA_NUMBERS` in `app/portal.py` is **6** (primary + 5 linked) and **must
 stay equal to `MAX_NUMBERS_PER_USER` in the bot's `routers/process.py`** — this
 side shows the allowance and hands out the linking codes, the bot enforces it
