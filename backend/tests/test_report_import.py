@@ -1,8 +1,8 @@
 """Offline test for the auto-report-0.1 record-keeper (in-memory SQLite).
 
-Proves the importer is ADDITIVE ONLY: it creates new earnings entries, adds
-order counts on top of the manual figure, refuses a duplicate date, and never
-touches pre-existing earnings.
+Proves the importer uses the STORED US rate, is ADDITIVE ONLY (creates new
+earnings entries, adds order counts on top of the manual figure), refuses a
+duplicate date, and never touches pre-existing earnings.
 """
 import os
 import sys
@@ -29,6 +29,14 @@ def check(name, cond, detail=""):
     print(("PASS " if cond else "FAIL ") + f" {name}" + ("" if cond else f"  {detail}"))
 
 
+def status_of(fn):
+    try:
+        fn()
+        return None
+    except Exception as ex:
+        return getattr(ex, "status_code", None)
+
+
 alice = portal.PortalAccount(whatsapp_number="+900001", username="alice",
                              password_hash="x", commission_rate=70)
 bob = portal.PortalAccount(whatsapp_number="+900002", username="bob",
@@ -44,17 +52,25 @@ s.add(manual)
 s.commit()
 manual_id = manual.id
 
-body = portal._ReportBody(marketplace="US", report_date="2026-09-03", fx_rate=280.0, entries=[
+body = portal._ReportBody(report_date="2026-09-03", entries=[
     portal._ReportEntryIn(account_id=alice.id, earnings_usd_cents=1162, ordered=15, shipped=15, returned=0),
     portal._ReportEntryIn(account_id=bob.id, earnings_usd_cents=2680, ordered=21, shipped=21, returned=4),
 ])
 
+# --- the import uses the STORED rate; without one it refuses ---
+check("rate is 0 until set", portal._get_usd_rate(s) == 0.0)
+check("preview refuses when no rate is set (422)",
+      status_of(lambda: portal.admin_report_preview(body, s)) == 422)
+portal.admin_report_set_rate(portal._RateBody(rate=280.0), s)
+check("rate is now 280", portal._get_usd_rate(s) == 280.0)
+
 # --- preview (must not write) ---
 pv = portal.admin_report_preview(body, s)
-check("preview: alice net = 70% of 3254 = 2278",
+check("preview uses stored rate: alice net = 70% of 3254 = 2278",
       any(u["username"] == "alice" and u["net_pkr"] == 2278 and u["gross_pkr"] == 3254 for u in pv["users"]), pv["users"])
 check("preview: bob net = 20% (default) of 7504 = 1501",
       any(u["username"] == "bob" and u["net_pkr"] == 1501 for u in pv["users"]))
+check("preview reports the applied rate", pv["fx_rate"] == 280.0)
 check("preview: not already imported", pv["already_imported"] is False)
 check("preview writes nothing", s.query(portal.ReportImport).count() == 0 and s.query(portal.EarningsEntry).count() == 1)
 
@@ -76,27 +92,18 @@ m = s.get(portal.EarningsEntry, manual_id)
 check("pre-existing manual entry is UNTOUCHED", m is not None and m.net_amount == 5000 and m.kind == "bonus")
 
 # --- duplicate date refused ---
-try:
-    portal.admin_report_record(body, s)
-    dup = False
-except Exception as ex:
-    dup = getattr(ex, "status_code", None) == 409
-check("re-importing the same date is refused (409 duplicate alert)", dup)
+check("re-importing the same date is refused (409 duplicate alert)",
+      status_of(lambda: portal.admin_report_record(body, s)) == 409)
 
 # --- dates endpoint (for the calendar) ---
 check("dates endpoint lists the imported date", portal.admin_report_dates("US", s)["dates"] == ["2026-09-03"])
 
-# --- US rate fixer ---
-check("rate is 0 until set", portal._get_usd_rate(s) == 0.0)
+# --- US rate fixer: updating it changes the rate for future reports ---
 portal.admin_report_set_rate(portal._RateBody(rate=278.5), s)
-check("rate saved and read back",
+check("rate updates and reads back",
       portal.admin_report_get_rate(s)["rate"] == 278.5 and portal._get_usd_rate(s) == 278.5)
-try:
-    portal.admin_report_set_rate(portal._RateBody(rate=0), s)
-    rate_bad = False
-except Exception as ex:
-    rate_bad = getattr(ex, "status_code", None) == 422
-check("a non-positive rate is refused (422)", rate_bad)
+check("a non-positive rate is refused (422)",
+      status_of(lambda: portal.admin_report_set_rate(portal._RateBody(rate=0), s)) == 422)
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

@@ -1886,9 +1886,12 @@ def admin_report_dates(marketplace: str = "US", session: Session = Depends(get_s
 def admin_report_preview(body: _ReportBody, session: Session = Depends(get_session)):
     if not auto_report_enabled():
         raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    fx = _get_usd_rate(session)
+    if fx <= 0:
+        raise HTTPException(status_code=422, detail="Set the US exchange rate first (US Rate tab).")
     lines, total_net = [], 0
     for e in body.entries:
-        got = _report_line(session, e, body.fx_rate)
+        got = _report_line(session, e, fx)
         if got is None:
             continue
         acc, rate, gross_pkr, net_pkr = got
@@ -1901,7 +1904,7 @@ def admin_report_preview(body: _ReportBody, session: Session = Depends(get_sessi
         })
     return {
         "marketplace": body.marketplace, "report_date": body.report_date,
-        "fx_rate": body.fx_rate,
+        "fx_rate": fx,
         "already_imported": _existing_import(session, body.marketplace, body.report_date) is not None,
         "users": lines, "user_count": len(lines), "total_net_pkr": total_net,
     }
@@ -1916,15 +1919,18 @@ def admin_report_record(body: _ReportBody, session: Session = Depends(get_sessio
             status_code=409,
             detail=f"{body.marketplace} report for {body.report_date} already imported",
         )
+    fx = _get_usd_rate(session)
+    if fx <= 0:
+        raise HTTPException(status_code=422, detail="Set the US exchange rate first (US Rate tab).")
     imp = ReportImport(
         marketplace=body.marketplace, report_date=body.report_date,
-        fx_rate_x100=round(body.fx_rate * 100),
+        fx_rate_x100=round(fx * 100),
     )
     session.add(imp)
     session.flush()
     created = 0
     for e in body.entries:
-        got = _report_line(session, e, body.fx_rate)
+        got = _report_line(session, e, fx)
         if got is None:
             continue
         acc, rate, gross_pkr, net_pkr = got
