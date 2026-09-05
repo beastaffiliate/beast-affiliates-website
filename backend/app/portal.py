@@ -1044,6 +1044,9 @@ def _earnings_summary(session: Session, account: PortalAccount) -> dict:
     earned = sum(e.net_amount for e in entries) + referrals
     paid = sum(p.amount for p in payouts)
     orders_paid = sum(p.orders_paid for p in payouts)
+    # US report imports ADD to the admin's manual order counts — they never
+    # overwrite account.orders. (0, 0) for anyone with no imports (auto-report-0.1).
+    report_ordered, report_shipped = _report_orders(session, account.id)
     return {
         "earned": earned,
         "paid": paid,
@@ -1058,8 +1061,8 @@ def _earnings_summary(session: Session, account: PortalAccount) -> dict:
         "orders_paid": orders_paid,
         # Clamped so a lowered Amazon total can never show a negative count.
         # admin_add_payout refuses to overdraw, so this should not trigger.
-        "current_orders": max(0, account.orders - orders_paid),
-        "current_shipped": max(0, account.shipped_orders - orders_paid),
+        "current_orders": max(0, account.orders + report_ordered - orders_paid),
+        "current_shipped": max(0, account.shipped_orders + report_shipped - orders_paid),
     }
 
 
@@ -1775,3 +1778,211 @@ def admin_backup(session: Session = Depends(get_session)):
             "min_payout": int(get_setting(session, "min_payout")),
         },
     }
+
+
+# ======================================================================
+# auto-report-0.1 — automated US affiliate-report earnings importer.
+# ADDITIVE ONLY: new tables (report_imports, report_import_entries) and new
+# admin endpoints. It never edits or deletes existing rows — it only CREATES
+# earnings_entries (kind 'earning'), exactly like a manual entry. Dormant
+# unless AUTO_REPORT is enabled in the environment. Revert: `git tag
+# pre-auto-report-0.1`, or delete this whole block + the two _report_orders
+# lines in _earnings_summary.
+# ======================================================================
+
+from pydantic import BaseModel  # noqa: E402
+
+
+def auto_report_enabled() -> bool:
+    return os.getenv("AUTO_REPORT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+class ReportImport(Base):
+    """One recorded import = one (marketplace, report_date). Its existence IS the
+    duplicate check: re-uploading the same date is refused."""
+
+    __tablename__ = "report_imports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    marketplace: Mapped[str] = mapped_column(String(4), default="US", index=True)
+    report_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    fx_rate_x100: Mapped[int] = mapped_column(Integer, default=0)  # PKR per USD x100
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ReportImportEntry(Base):
+    """Per-user line of an import: links to the earnings_entry created (0 when the
+    day had no money) and records US order counts, so Total Orders can ADD them
+    to the admin's manual figure without ever overwriting it."""
+
+    __tablename__ = "report_import_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(Integer, index=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    entry_id: Mapped[int] = mapped_column(Integer, default=0)
+    ordered: Mapped[int] = mapped_column(Integer, default=0)
+    shipped: Mapped[int] = mapped_column(Integer, default=0)
+    returned: Mapped[int] = mapped_column(Integer, default=0)
+
+
+def _report_orders(session: Session, account_id: int) -> tuple[int, int]:
+    """(ordered, shipped) totals across every report import for this account —
+    the US figures that ADD to the admin's manual counts. Returns (0, 0) when
+    there are none, so a user with no imports is entirely unaffected."""
+    try:
+        rows = session.execute(
+            select(ReportImportEntry).where(ReportImportEntry.account_id == account_id)
+        ).scalars().all()
+    except Exception:
+        return (0, 0)
+    return (sum(r.ordered for r in rows), sum(r.shipped for r in rows))
+
+
+class _ReportEntryIn(BaseModel):
+    account_id: int
+    earnings_usd_cents: int = 0
+    ordered: int = 0
+    shipped: int = 0
+    returned: int = 0
+
+
+class _ReportBody(BaseModel):
+    marketplace: str = "US"
+    report_date: str
+    fx_rate: float = 0.0
+    entries: list[_ReportEntryIn] = []
+
+
+def _existing_import(session: Session, marketplace: str, report_date: str):
+    return session.execute(
+        select(ReportImport).where(
+            ReportImport.marketplace == marketplace,
+            ReportImport.report_date == report_date,
+        )
+    ).scalars().first()
+
+
+def _report_line(session: Session, e: "_ReportEntryIn", fx_rate: float):
+    """Compute one user's PKR for a report entry. None if the account is gone."""
+    acc = session.get(PortalAccount, e.account_id)
+    if acc is None:
+        return None
+    rate = _effective_rate(session, acc)
+    gross_pkr = round(e.earnings_usd_cents / 100.0 * fx_rate)
+    net_pkr = round(gross_pkr * rate / 100.0)
+    return acc, rate, gross_pkr, net_pkr
+
+
+@admin_router.get("/report-import/dates", dependencies=[Depends(require_service_key)])
+def admin_report_dates(marketplace: str = "US", session: Session = Depends(get_session)):
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    rows = session.execute(
+        select(ReportImport).where(ReportImport.marketplace == marketplace)
+    ).scalars().all()
+    return {"marketplace": marketplace, "dates": sorted(r.report_date for r in rows)}
+
+
+@admin_router.post("/report-import/preview", dependencies=[Depends(require_service_key)])
+def admin_report_preview(body: _ReportBody, session: Session = Depends(get_session)):
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    lines, total_net = [], 0
+    for e in body.entries:
+        got = _report_line(session, e, body.fx_rate)
+        if got is None:
+            continue
+        acc, rate, gross_pkr, net_pkr = got
+        total_net += net_pkr
+        lines.append({
+            "account_id": acc.id, "username": acc.username,
+            "earnings_usd": round(e.earnings_usd_cents / 100.0, 2), "rate": rate,
+            "gross_pkr": gross_pkr, "net_pkr": net_pkr,
+            "ordered": e.ordered, "shipped": e.shipped, "returned": e.returned,
+        })
+    return {
+        "marketplace": body.marketplace, "report_date": body.report_date,
+        "fx_rate": body.fx_rate,
+        "already_imported": _existing_import(session, body.marketplace, body.report_date) is not None,
+        "users": lines, "user_count": len(lines), "total_net_pkr": total_net,
+    }
+
+
+@admin_router.post("/report-import/record", dependencies=[Depends(require_service_key)])
+def admin_report_record(body: _ReportBody, session: Session = Depends(get_session)):
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    if _existing_import(session, body.marketplace, body.report_date) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{body.marketplace} report for {body.report_date} already imported",
+        )
+    imp = ReportImport(
+        marketplace=body.marketplace, report_date=body.report_date,
+        fx_rate_x100=round(body.fx_rate * 100),
+    )
+    session.add(imp)
+    session.flush()
+    created = 0
+    for e in body.entries:
+        got = _report_line(session, e, body.fx_rate)
+        if got is None:
+            continue
+        acc, rate, gross_pkr, net_pkr = got
+        entry_id = 0
+        if gross_pkr != 0:
+            entry = EarningsEntry(
+                account_id=acc.id, kind="earning", gross_amount=gross_pkr,
+                rate_applied=rate, net_amount=net_pkr, orders_count=0,
+                label=f"{body.marketplace} report {body.report_date}", note="auto-report",
+            )
+            session.add(entry)
+            session.flush()
+            entry_id = entry.id
+            created += 1
+        session.add(ReportImportEntry(
+            import_id=imp.id, account_id=acc.id, entry_id=entry_id,
+            ordered=e.ordered, shipped=e.shipped, returned=e.returned,
+        ))
+    session.commit()
+    return {
+        "ok": True, "import_id": imp.id, "report_date": body.report_date,
+        "earnings_entries_created": created, "users": len(body.entries),
+    }
+
+
+# --- auto-report-0.1: the fixed USD -> PKR rate the US report import uses ---
+
+
+class _RateBody(BaseModel):
+    rate: float
+
+
+def _get_usd_rate(session: Session) -> float:
+    """The stored USD->PKR rate, or 0.0 if the admin has not set one yet."""
+    row = session.get(PortalSetting, "usd_pkr_rate")
+    try:
+        return float(row.value) if row else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@admin_router.get("/report-import/rate", dependencies=[Depends(require_service_key)])
+def admin_report_get_rate(session: Session = Depends(get_session)):
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    return {"rate": _get_usd_rate(session)}
+
+
+@admin_router.put("/report-import/rate", dependencies=[Depends(require_service_key)])
+def admin_report_set_rate(body: _RateBody, session: Session = Depends(get_session)):
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    if body.rate <= 0:
+        raise HTTPException(status_code=422, detail="Rate must be greater than 0")
+    row = session.get(PortalSetting, "usd_pkr_rate")
+    if row:
+        row.value = str(body.rate)
+    else:
+        session.add(PortalSetting(key="usd_pkr_rate", value=str(body.rate)))
+    session.commit()
+    return {"rate": body.rate}
