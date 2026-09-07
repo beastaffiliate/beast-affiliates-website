@@ -855,6 +855,30 @@ def admin_delete_account(account_id: int, session: Session = Depends(get_session
     return {"ok": True}
 
 
+@admin_router.post(
+    "/accounts/{account_id}/reset-reports", dependencies=[Depends(require_service_key)]
+)
+def admin_reset_account_reports(account_id: int, session: Session = Depends(get_session)):
+    """Clear ONE account's auto-report contributions (report_import_entries).
+
+    The account, login, earnings and manual order counts are all untouched —
+    this only removes the ordered/shipped that US report imports ADDED for this
+    user, so `current_orders`/`current_shipped` fall back to the manual figure.
+    Used to zero a test account's report-derived counts. Scoped to this account.
+    """
+    account = session.get(PortalAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Account not found")
+    rows = session.execute(
+        select(ReportImportEntry).where(ReportImportEntry.account_id == account_id)
+    ).scalars().all()
+    for r in rows:
+        session.delete(r)
+    session.commit()
+    return {"ok": True, "account_id": account_id, "username": account.username,
+            "report_entries_removed": len(rows)}
+
+
 @admin_router.get(
     "/accounts/{account_id}/links", dependencies=[Depends(require_service_key)]
 )

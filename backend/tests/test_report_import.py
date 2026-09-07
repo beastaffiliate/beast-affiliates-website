@@ -148,5 +148,23 @@ check("rate updates and reads back",
 check("a non-positive rate is refused (422)",
       status_of(lambda: portal.admin_report_set_rate(portal._RateBody(rate=0), s)) == 422)
 
+# --- per-account "Clear reports" reset (zeroes report-derived counts only) ---
+portal.admin_report_record(portal._ReportBody(report_date="2026-09-09", entries=[
+    portal._ReportEntryIn(account_id=alice.id, earnings_usd_cents=100, ordered=5, shipped=5, returned=0),
+]), s)
+bal_before_rr = portal._earnings_summary(s, alice)["balance"]
+check("alice has report-derived orders before reset (manual 10 + report 5)",
+      portal._earnings_summary(s, alice)["current_orders"] == 15)
+rr = portal.admin_reset_account_reports(alice.id, s)
+check("reset-reports removed alice's report entries", rr["report_entries_removed"] >= 1, rr)
+check("after reset current_orders falls back to manual 10",
+      portal._earnings_summary(s, alice)["current_orders"] == 10)
+check("after reset current_shipped falls back to manual 8",
+      portal._earnings_summary(s, alice)["current_shipped"] == 8)
+check("reset-reports left the earnings balance untouched",
+      portal._earnings_summary(s, alice)["balance"] == bal_before_rr)
+check("reset-reports on an unknown account is 404",
+      status_of(lambda: portal.admin_reset_account_reports(999999, s)) == 404)
+
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
