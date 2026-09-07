@@ -723,6 +723,9 @@ def admin_list_accounts(session: Session = Depends(get_session)):
     out = []
     for a in accounts:
         links = _user_links(session, a.whatsapp_number)
+        # What US report imports ADDED for this account, so the admin row can
+        # show the same total the user sees (manual figure + report figure).
+        report_ordered, report_shipped = _report_orders(session, a.id)
         out.append({
             "id": a.id,
             "username": a.username,
@@ -738,8 +741,10 @@ def admin_list_accounts(session: Session = Depends(get_session)):
             "links": len(links),
             "views": sum(l.views for l in links),
             "clicks": sum(l.clicks for l in links),
-            "orders": a.orders,
+            "orders": a.orders,                 # manual base (the pencil edits this)
             "shipped_orders": a.shipped_orders,
+            "report_orders": report_ordered,    # added by US report imports
+            "report_shipped": report_shipped,
         })
     return {"accounts": out}
 

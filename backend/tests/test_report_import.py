@@ -91,6 +91,9 @@ summ = portal._earnings_summary(s, alice)
 check("alice current_orders = manual(10) + report(15) = 25 (additive)", summ["current_orders"] == 25, summ)
 check("alice current_shipped = manual(8) + report(15) = 23 (additive)", summ["current_shipped"] == 23, summ)
 check("alice balance = manual 5000 + report 2278 = 7278 (additive)", summ["balance"] == 7278, summ)
+acc_row = next(x for x in portal.admin_list_accounts(s)["accounts"] if x["username"] == "alice")
+check("admin row exposes report_orders/report_shipped so it can show the total",
+      acc_row["orders"] == 10 and acc_row["report_orders"] == 15 and acc_row["report_shipped"] == 15, acc_row)
 m = s.get(portal.EarningsEntry, manual_id)
 check("pre-existing manual entry is UNTOUCHED", m is not None and m.net_amount == 5000 and m.kind == "bonus")
 
