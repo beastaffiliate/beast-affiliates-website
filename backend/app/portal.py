@@ -115,6 +115,11 @@ PORTAL_MIGRATIONS = [
     # Not a portal table, but this is the only migration runner the website has.
     "ALTER TABLE links ADD COLUMN IF NOT EXISTS site TEXT DEFAULT ''",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_portal_store_slug ON portal_accounts (store_slug)",
+    # auto-report-0.1: multiple reports per day — each import is numbered (seq)
+    # within its (marketplace, date), and carries a content fingerprint so the
+    # exact same report can't be imported twice.
+    "ALTER TABLE report_imports ADD COLUMN IF NOT EXISTS seq INTEGER DEFAULT 1",
+    "ALTER TABLE report_imports ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64) DEFAULT ''",
 ]
 
 
@@ -1798,13 +1803,19 @@ def auto_report_enabled() -> bool:
 
 
 class ReportImport(Base):
-    """One recorded import = one (marketplace, report_date). Its existence IS the
-    duplicate check: re-uploading the same date is refused."""
+    """One recorded import = one report file for a (marketplace, report_date).
+
+    A day can hold several reports (multiple affiliate accounts): each gets an
+    incrementing `seq` (Report 1, 2, 3...) within its date. `content_hash`
+    fingerprints the imported rows so the exact same report can't be recorded
+    twice for the same day."""
 
     __tablename__ = "report_imports"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     marketplace: Mapped[str] = mapped_column(String(4), default="US", index=True)
     report_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    seq: Mapped[int] = mapped_column(Integer, default=1)  # 1-based report number that day
+    content_hash: Mapped[str] = mapped_column(String(64), default="")  # exact-dup guard
     fx_rate_x100: Mapped[int] = mapped_column(Integer, default=0)  # PKR per USD x100
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1852,13 +1863,46 @@ class _ReportBody(BaseModel):
     entries: list[_ReportEntryIn] = []
 
 
-def _existing_import(session: Session, marketplace: str, report_date: str):
+def _reports_for_date(session: Session, marketplace: str, report_date: str):
+    """Every report already recorded for this (marketplace, date), oldest first."""
     return session.execute(
         select(ReportImport).where(
             ReportImport.marketplace == marketplace,
             ReportImport.report_date == report_date,
+        ).order_by(ReportImport.seq)
+    ).scalars().all()
+
+
+def _entries_fingerprint(entries: "list[_ReportEntryIn]") -> str:
+    """Order-independent fingerprint of the rows being imported, so re-uploading
+    the exact same report (same users, same money, same counts) is detectable
+    regardless of row order."""
+    parts = sorted(
+        f"{e.account_id}:{e.earnings_usd_cents}:{e.ordered}:{e.shipped}:{e.returned}"
+        for e in entries
+    )
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
+
+def _already_paid_usernames(session: Session, marketplace: str, report_date: str,
+                            account_ids: "set[int]") -> list[str]:
+    """Of the given accounts, which already have a report entry for this date
+    (from an earlier report that day) — the soft double-pay warning."""
+    imports = _reports_for_date(session, marketplace, report_date)
+    if not imports or not account_ids:
+        return []
+    prior = session.execute(
+        select(ReportImportEntry).where(
+            ReportImportEntry.import_id.in_([i.id for i in imports])
         )
-    ).scalars().first()
+    ).scalars().all()
+    hit = {e.account_id for e in prior} & account_ids
+    if not hit:
+        return []
+    rows = session.execute(
+        select(PortalAccount).where(PortalAccount.id.in_(hit))
+    ).scalars().all()
+    return sorted(a.username for a in rows)
 
 
 def _report_line(session: Session, e: "_ReportEntryIn", fx_rate: float):
@@ -1879,7 +1923,10 @@ def admin_report_dates(marketplace: str = "US", session: Session = Depends(get_s
     rows = session.execute(
         select(ReportImport).where(ReportImport.marketplace == marketplace)
     ).scalars().all()
-    return {"marketplace": marketplace, "dates": sorted(r.report_date for r in rows)}
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r.report_date] = counts.get(r.report_date, 0) + 1
+    return {"marketplace": marketplace, "dates": sorted(counts), "counts": counts}
 
 
 @admin_router.delete("/report-import/all", dependencies=[Depends(require_service_key)])
@@ -1932,10 +1979,17 @@ def admin_report_preview(body: _ReportBody, session: Session = Depends(get_sessi
             "gross_pkr": gross_pkr, "net_pkr": net_pkr,
             "ordered": e.ordered, "shipped": e.shipped, "returned": e.returned,
         })
+    existing = _reports_for_date(session, body.marketplace, body.report_date)
+    account_ids = {ln["account_id"] for ln in lines}
     return {
         "marketplace": body.marketplace, "report_date": body.report_date,
         "fx_rate": fx,
-        "already_imported": _existing_import(session, body.marketplace, body.report_date) is not None,
+        # How many reports this day already has, and the number this one would be.
+        "existing_reports": len(existing),
+        "report_seq": (max((i.seq for i in existing), default=0)) + 1,
+        # Soft warning: users already paid by an earlier report today.
+        "already_paid_users": _already_paid_usernames(
+            session, body.marketplace, body.report_date, account_ids),
         "users": lines, "user_count": len(lines), "total_net_pkr": total_net,
     }
 
@@ -1944,17 +1998,25 @@ def admin_report_preview(body: _ReportBody, session: Session = Depends(get_sessi
 def admin_report_record(body: _ReportBody, session: Session = Depends(get_session)):
     if not auto_report_enabled():
         raise HTTPException(status_code=404, detail="auto-report is not enabled")
-    if _existing_import(session, body.marketplace, body.report_date) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"{body.marketplace} report for {body.report_date} already imported",
-        )
     fx = _get_usd_rate(session)
     if fx <= 0:
         raise HTTPException(status_code=422, detail="Set the US exchange rate first (US Rate tab).")
+    # A day can hold several reports (one per affiliate account). Number this one
+    # after the reports already there, but refuse an EXACT re-upload (same rows)
+    # so the same report can't be double-counted.
+    existing = _reports_for_date(session, body.marketplace, body.report_date)
+    fingerprint = _entries_fingerprint(body.entries)
+    dup = next((i for i in existing if i.content_hash and i.content_hash == fingerprint), None)
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"This exact {body.marketplace} report was already imported for "
+                    f"{body.report_date} as Report {dup.seq}."),
+        )
+    seq = (max((i.seq for i in existing), default=0)) + 1
     imp = ReportImport(
         marketplace=body.marketplace, report_date=body.report_date,
-        fx_rate_x100=round(fx * 100),
+        seq=seq, content_hash=fingerprint, fx_rate_x100=round(fx * 100),
     )
     session.add(imp)
     session.flush()
@@ -1969,7 +2031,8 @@ def admin_report_record(body: _ReportBody, session: Session = Depends(get_sessio
             entry = EarningsEntry(
                 account_id=acc.id, kind="earning", gross_amount=gross_pkr,
                 rate_applied=rate, net_amount=net_pkr, orders_count=0,
-                label=f"{body.marketplace} report {body.report_date}", note="auto-report",
+                label=f"{body.marketplace} report {body.report_date} (Report {seq})",
+                note="auto-report",
             )
             session.add(entry)
             session.flush()
@@ -1982,6 +2045,7 @@ def admin_report_record(body: _ReportBody, session: Session = Depends(get_sessio
     session.commit()
     return {
         "ok": True, "import_id": imp.id, "report_date": body.report_date,
+        "report_seq": seq,
         "earnings_entries_created": created, "users": len(body.entries),
     }
 

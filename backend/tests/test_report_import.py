@@ -71,7 +71,8 @@ check("preview uses stored rate: alice net = 70% of 3254 = 2278",
 check("preview: bob net = 20% (default) of 7504 = 1501",
       any(u["username"] == "bob" and u["net_pkr"] == 1501 for u in pv["users"]))
 check("preview reports the applied rate", pv["fx_rate"] == 280.0)
-check("preview: not already imported", pv["already_imported"] is False)
+check("preview: day has no reports yet", pv["existing_reports"] == 0 and pv["report_seq"] == 1, pv)
+check("preview: no overlap warning on a fresh day", pv["already_paid_users"] == [])
 check("preview writes nothing", s.query(portal.ReportImport).count() == 0 and s.query(portal.EarningsEntry).count() == 1)
 
 # --- record (writes) ---
@@ -91,20 +92,43 @@ check("alice balance = manual 5000 + report 2278 = 7278 (additive)", summ["balan
 m = s.get(portal.EarningsEntry, manual_id)
 check("pre-existing manual entry is UNTOUCHED", m is not None and m.net_amount == 5000 and m.kind == "bonus")
 
-# --- duplicate date refused ---
-check("re-importing the same date is refused (409 duplicate alert)",
+# --- exact re-upload of the SAME report is refused (hash guard) ---
+check("re-uploading the identical report is refused (409 exact duplicate)",
       status_of(lambda: portal.admin_report_record(body, s)) == 409)
 
-# --- dates endpoint (for the calendar) ---
-check("dates endpoint lists the imported date", portal.admin_report_dates("US", s)["dates"] == ["2026-09-03"])
+# --- multiple reports per day: numbering + overlap warning ---
+pv2 = portal.admin_report_preview(body, s)
+check("preview: day already has 1 report, this would be Report 2",
+      pv2["existing_reports"] == 1 and pv2["report_seq"] == 2, pv2)
+check("preview flags users already paid earlier today (soft overlap warning)",
+      pv2["already_paid_users"] == ["alice", "bob"], pv2["already_paid_users"])
+
+# a DIFFERENT report (different rows) for the same day IS allowed, as Report 2
+body2 = portal._ReportBody(report_date="2026-09-03", entries=[
+    portal._ReportEntryIn(account_id=bob.id, earnings_usd_cents=500, ordered=3, shipped=3, returned=0),
+])
+res2 = portal.admin_report_record(body2, s)
+check("a different report for the same day records as Report 2", res2["report_seq"] == 2, res2)
+check("bob's Report 2 earning is ADDITIVE (a 2nd auto-report entry)",
+      s.query(portal.EarningsEntry).filter(
+          portal.EarningsEntry.account_id == bob.id,
+          portal.EarningsEntry.note == "auto-report").count() == 2)
+check("Report 2 label carries its number",
+      s.execute(select(portal.EarningsEntry).where(
+          portal.EarningsEntry.label == "US report 2026-09-03 (Report 2)")).scalars().first() is not None)
+
+# --- dates endpoint (for the calendar): counts reports per day ---
+d = portal.admin_report_dates("US", s)
+check("dates endpoint lists the day", d["dates"] == ["2026-09-03"])
+check("dates endpoint counts 2 reports that day", d["counts"] == {"2026-09-03": 2}, d)
 
 # --- calendar reset: LEDGER ONLY (clears calendar, keeps earnings balances) ---
 bal_before = portal._earnings_summary(s, alice)["balance"]
 rst = portal.admin_report_reset("US", s)
-check("reset removed the 1 import ledger row", rst["imports_removed"] == 1, rst)
+check("reset removed both import ledger rows", rst["imports_removed"] == 2, rst)
 check("reset cleared the calendar (no dates)", portal.admin_report_dates("US", s)["dates"] == [])
 check("reset left every earnings entry in place (money untouched)",
-      s.query(portal.EarningsEntry).count() == 3)  # manual bonus + 2 report earnings
+      s.query(portal.EarningsEntry).count() == 4)  # manual + Report1 alice/bob + Report2 bob
 check("reset kept alice's balance identical", portal._earnings_summary(s, alice)["balance"] == bal_before)
 check("reset dropped the report-derived order counts (ledger gone)",
       portal._earnings_summary(s, alice)["current_orders"] == 0)
