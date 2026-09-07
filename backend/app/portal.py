@@ -1882,6 +1882,36 @@ def admin_report_dates(marketplace: str = "US", session: Session = Depends(get_s
     return {"marketplace": marketplace, "dates": sorted(r.report_date for r in rows)}
 
 
+@admin_router.delete("/report-import/all", dependencies=[Depends(require_service_key)])
+def admin_report_reset(marketplace: str = "US", session: Session = Depends(get_session)):
+    """Clear the import LEDGER for a marketplace so the calendar starts fresh.
+
+    Deletes report_imports (the calendar/duplicate history) and their
+    report_import_entries (the US order-count contributions). Earnings entries
+    are INTENTIONALLY left untouched — balances do not change. Note: after this
+    the wiped dates become re-importable, so avoid re-uploading the same day.
+    """
+    if not auto_report_enabled():
+        raise HTTPException(status_code=404, detail="auto-report is not enabled")
+    imports = session.execute(
+        select(ReportImport).where(ReportImport.marketplace == marketplace)
+    ).scalars().all()
+    import_ids = [i.id for i in imports]
+    entries_removed = 0
+    if import_ids:
+        entries = session.execute(
+            select(ReportImportEntry).where(ReportImportEntry.import_id.in_(import_ids))
+        ).scalars().all()
+        for e in entries:
+            session.delete(e)
+            entries_removed += 1
+    for imp in imports:
+        session.delete(imp)
+    session.commit()
+    return {"ok": True, "marketplace": marketplace,
+            "imports_removed": len(import_ids), "entries_removed": entries_removed}
+
+
 @admin_router.post("/report-import/preview", dependencies=[Depends(require_service_key)])
 def admin_report_preview(body: _ReportBody, session: Session = Depends(get_session)):
     if not auto_report_enabled():

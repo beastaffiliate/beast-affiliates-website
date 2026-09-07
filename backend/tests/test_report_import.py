@@ -98,6 +98,19 @@ check("re-importing the same date is refused (409 duplicate alert)",
 # --- dates endpoint (for the calendar) ---
 check("dates endpoint lists the imported date", portal.admin_report_dates("US", s)["dates"] == ["2026-09-03"])
 
+# --- calendar reset: LEDGER ONLY (clears calendar, keeps earnings balances) ---
+bal_before = portal._earnings_summary(s, alice)["balance"]
+rst = portal.admin_report_reset("US", s)
+check("reset removed the 1 import ledger row", rst["imports_removed"] == 1, rst)
+check("reset cleared the calendar (no dates)", portal.admin_report_dates("US", s)["dates"] == [])
+check("reset left every earnings entry in place (money untouched)",
+      s.query(portal.EarningsEntry).count() == 3)  # manual bonus + 2 report earnings
+check("reset kept alice's balance identical", portal._earnings_summary(s, alice)["balance"] == bal_before)
+check("reset dropped the report-derived order counts (ledger gone)",
+      portal._earnings_summary(s, alice)["current_orders"] == 0)
+check("after reset the same date is importable again", portal.admin_report_record(body, s)["ok"] is True)
+portal.admin_report_reset("US", s)  # tidy up so later assertions are clean
+
 # --- US rate fixer: updating it changes the rate for future reports ---
 portal.admin_report_set_rate(portal._RateBody(rate=278.5), s)
 check("rate updates and reads back",
