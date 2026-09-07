@@ -38,7 +38,8 @@ def status_of(fn):
 
 
 alice = portal.PortalAccount(whatsapp_number="+900001", username="alice",
-                             password_hash="x", commission_rate=70)
+                             password_hash="x", commission_rate=70,
+                             orders=10, shipped_orders=8)  # pre-existing manual counts
 bob = portal.PortalAccount(whatsapp_number="+900002", username="bob",
                            password_hash="x")  # no rate -> default 20
 s.add_all([alice, bob])
@@ -87,7 +88,8 @@ check("ledger row recorded for the date", s.query(portal.ReportImport).filter_by
 
 # --- additive order counts + untouched manual ---
 summ = portal._earnings_summary(s, alice)
-check("alice current_orders = manual(0) + report(15)", summ["current_orders"] == 15, summ)
+check("alice current_orders = manual(10) + report(15) = 25 (additive)", summ["current_orders"] == 25, summ)
+check("alice current_shipped = manual(8) + report(15) = 23 (additive)", summ["current_shipped"] == 23, summ)
 check("alice balance = manual 5000 + report 2278 = 7278 (additive)", summ["balance"] == 7278, summ)
 m = s.get(portal.EarningsEntry, manual_id)
 check("pre-existing manual entry is UNTOUCHED", m is not None and m.net_amount == 5000 and m.kind == "bonus")
@@ -113,6 +115,10 @@ check("bob's Report 2 earning is ADDITIVE (a 2nd auto-report entry)",
       s.query(portal.EarningsEntry).filter(
           portal.EarningsEntry.account_id == bob.id,
           portal.EarningsEntry.note == "auto-report").count() == 2)
+# order counts stack across BOTH reports for the same user (Report 1: 21/21, Report 2: 3/3)
+bob_summ = portal._earnings_summary(s, bob)
+check("bob current_orders stacks across reports = 21 + 3 = 24", bob_summ["current_orders"] == 24, bob_summ)
+check("bob current_shipped stacks across reports = 21 + 3 = 24", bob_summ["current_shipped"] == 24, bob_summ)
 check("Report 2 label carries its number",
       s.execute(select(portal.EarningsEntry).where(
           portal.EarningsEntry.label == "US report 2026-09-03 (Report 2)")).scalars().first() is not None)
@@ -130,8 +136,8 @@ check("reset cleared the calendar (no dates)", portal.admin_report_dates("US", s
 check("reset left every earnings entry in place (money untouched)",
       s.query(portal.EarningsEntry).count() == 4)  # manual + Report1 alice/bob + Report2 bob
 check("reset kept alice's balance identical", portal._earnings_summary(s, alice)["balance"] == bal_before)
-check("reset dropped the report-derived order counts (ledger gone)",
-      portal._earnings_summary(s, alice)["current_orders"] == 0)
+check("reset dropped ONLY the report-derived order counts (manual 10 remains)",
+      portal._earnings_summary(s, alice)["current_orders"] == 10)
 check("after reset the same date is importable again", portal.admin_report_record(body, s)["ok"] is True)
 portal.admin_report_reset("US", s)  # tidy up so later assertions are clean
 
