@@ -68,7 +68,6 @@ US_SITES: dict[str, str] = {
     "beastfinds": os.getenv("ARTICLE_BASE_FINDS", "https://www.beastfinds.com"),
     "beastscart": os.getenv("ARTICLE_BASE_CART", "https://www.beastscart.com"),
     "beastsdeal": os.getenv("ARTICLE_BASE_DEAL", "https://www.beastsdeal.com"),
-    "qualitypick": os.getenv("ARTICLE_BASE_QUALITYPICK", "https://affiliate.qualitypick.net"),
 }
 
 
