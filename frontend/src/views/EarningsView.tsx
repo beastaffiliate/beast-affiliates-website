@@ -2,13 +2,6 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { MyEarnings } from "../types";
 
-const KIND_LABEL: Record<string, string> = {
-  earning: "Earning",
-  bonus: "Bonus",
-  adjustment: "Adjustment",
-  return: "Return",
-};
-
 function fmtRs(n: number) {
   return "Rs " + n.toLocaleString();
 }
@@ -100,79 +93,41 @@ export default function EarningsView() {
         </div>
       )}
 
-      <div className="grid grid-2">
-        <div className="card rise rise-4">
-          <h3 className="heading" style={{ marginBottom: 12 }}>Earnings history</h3>
-          {data.entries.length === 0 ? (
-            <p className="muted caption">
-              Nothing yet — earnings appear here after the team records your
-              commissions. Keep sharing links!
-            </p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Period</th>
-                    <th>Amount</th>
-                    <th>Date</th>
+      {/* Earnings history is intentionally NOT shown to users here — the
+          per-entry commission breakdown stays admin-only. Payout history
+          remains, now full width. */}
+      <div className="card rise rise-4">
+        <h3 className="heading" style={{ marginBottom: 12 }}>Payout history</h3>
+        {data.payouts.length === 0 ? (
+          <p className="muted caption">
+            No payouts yet — they'll appear here once you reach the minimum
+            payout amount.
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Paid amount</th>
+                  <th>Paid orders</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.payouts.map((p, i) => (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 700 }}>{fmtRs(p.amount)}</td>
+                    <td>{p.orders_paid || <span className="muted">—</span>}</td>
+                    <td className="caption muted" style={{ whiteSpace: "nowrap" }}>
+                      {new Date(p.paid_at).toLocaleDateString()}
+                      {p.note ? <span className="muted"> — {p.note}</span> : null}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.entries.map((e, i) => (
-                    <tr key={i}>
-                      <td>
-                        <span className="chip">{KIND_LABEL[e.kind] ?? e.kind}</span>
-                      </td>
-                      <td>{e.label}</td>
-                      <td style={{ color: e.amount < 0 ? "var(--error)" : "var(--success)", fontWeight: 700 }}>
-                        {e.amount < 0 ? "−" : "+"}{fmtRs(Math.abs(e.amount))}
-                      </td>
-                      <td className="caption muted" style={{ whiteSpace: "nowrap" }}>
-                        {new Date(e.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="card rise rise-4">
-          <h3 className="heading" style={{ marginBottom: 12 }}>Payout history</h3>
-          {data.payouts.length === 0 ? (
-            <p className="muted caption">
-              No payouts yet — they'll appear here once you reach the minimum
-              payout amount.
-            </p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Paid amount</th>
-                    <th>Paid orders</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.payouts.map((p, i) => (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 700 }}>{fmtRs(p.amount)}</td>
-                      <td>{p.orders_paid || <span className="muted">—</span>}</td>
-                      <td className="caption muted" style={{ whiteSpace: "nowrap" }}>
-                        {new Date(p.paid_at).toLocaleDateString()}
-                        {p.note ? <span className="muted"> — {p.note}</span> : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

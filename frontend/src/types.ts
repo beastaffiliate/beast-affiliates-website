@@ -58,13 +58,7 @@ export interface MyEarnings {
   return_orders: number;
   min_payout: number;
   referrals: { referred_name: string; amount: number; created_at: string }[];
-  entries: {
-    kind: string;
-    amount: number;
-    label: string;
-    orders_count: number;
-    created_at: string;
-  }[];
+  // Per-entry earnings history is admin-only — not sent to the user dashboard.
   payouts: {
     amount: number;
     orders_paid: number;

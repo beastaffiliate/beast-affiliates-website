@@ -1509,11 +1509,9 @@ def my_earnings(
     amounts live in the payout history, where they read as history.
     """
     summary = _earnings_summary(session, account)
-    entries = session.execute(
-        select(EarningsEntry)
-        .where(EarningsEntry.account_id == account.id)
-        .order_by(EarningsEntry.created_at.desc())
-    ).scalars().all()
+    # The per-entry earnings breakdown is intentionally NOT sent to users — it is
+    # admin-only (see the admin earnings endpoints). Only the totals, referral
+    # rewards and payout history reach the user's dashboard.
     payouts = session.execute(
         select(PayoutRecord)
         .where(PayoutRecord.account_id == account.id)
@@ -1529,12 +1527,6 @@ def my_earnings(
             {"referred_name": r["referred_name"], "amount": r["amount"],
              "created_at": r["created_at"]}
             for r in _referrals_for(session, account.id)
-        ],
-        "entries": [
-            {"kind": e.kind, "amount": e.net_amount, "label": e.label,
-             "orders_count": e.orders_count,
-             "created_at": e.created_at.isoformat()}
-            for e in entries
         ],
         "payouts": [
             {"amount": p.amount, "orders_paid": p.orders_paid,
